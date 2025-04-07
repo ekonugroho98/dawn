@@ -1,0 +1,8 @@
+requests
+anticaptchaofficial
+python-telegram-bot
+colorlog
+colorama
+fake-useragent
+pysocks
+urllib3
