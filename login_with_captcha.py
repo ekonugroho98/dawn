@@ -6,10 +6,14 @@ from anticaptchaofficial.imagecaptcha import *
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 import logging
+from fake_useragent import UserAgent
+import os
 
 # Setup logging sederhana
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger()
+
+ua = UserAgent()
 
 # File konfigurasi dan proxy
 CONFIG_FILE = "config.json"
@@ -26,8 +30,7 @@ headers = {
     'sec-ch-ua-platform': '"macOS"',
     'sec-fetch-dest': 'empty',
     'sec-fetch-mode': 'cors',
-    'sec-fetch-site': 'cross-site',
-    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36'
+    'sec-fetch-site': 'cross-site'
 }
 
 # Fungsi untuk parsing proxy
@@ -145,34 +148,6 @@ def solve_captcha(image_path):
         logger.error("Task selesai dengan error: " + solver.error_code)
         return None
 
-# Langkah 4: Melakukan login dengan appid spesifik
-def perform_login(session, puzzle_id, captcha_solution, username, password, appid):
-    url = f"https://ext-api.dawninternet.com/chromeapi/dawn/v1/user/login/v2?appid={appid}"
-    login_headers = headers.copy()
-    login_headers['content-type'] = 'application/json'
-
-    payload = {
-        "username": username,
-        "password": password,
-        "logindata": {
-            "_v": {"version": "1.1.4"},
-            "datetime": datetime.utcnow().isoformat() + "Z"
-        },
-        "puzzle_id": puzzle_id,
-        "ans": captcha_solution,
-        "appid": appid
-    }
-
-    try:
-        response = session.post(url, headers=login_headers, data=json.dumps(payload))
-        response.raise_for_status()
-        data = response.json()
-        logger.info(f"Login response untuk {username}: {json.dumps(data, indent=2)}")
-        return data
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error saat login untuk {username}: {e}")
-        return None
-
 # Langkah 5: Update config.json
 def update_config_with_token(login_response, config_data, config_file="config.json"):
     if not login_response or not login_response.get("status"):
@@ -200,8 +175,54 @@ def update_config_with_token(login_response, config_data, config_file="config.js
     logger.info(f"Token untuk {email} telah diperbarui di {config_file}")
     return config_data
 
-# Langkah 6: Login semua akun dengan logika proxy, appid per akun, dan skip jika token ada
-def login_all_accounts(config_file=CONFIG_FILE):
+# Fungsi untuk menulis log ke file teks
+def log_to_file(filename, message):
+    with open(filename, "a") as f:
+        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
+
+# Langkah 4: Melakukan login dengan appid spesifik (dari kode sebelumnya, diperbarui untuk debugging)
+def perform_login(session, puzzle_id, captcha_solution, username, password, appid):
+    url = f"https://ext-api.dawninternet.com/chromeapi/dawn/v1/user/login/v2?appid={appid}"
+    
+    login_headers = headers.copy()
+    login_headers['content-type'] = 'application/json'
+    login_headers["User-Agent"] = ua.random
+
+    payload = {
+        "username": username,
+        "password": password,
+        "logindata": {
+            "_v": {"version": "1.1.4"},
+            "datetime": datetime.utcnow().isoformat() + "Z"
+        },
+        "puzzle_id": puzzle_id,
+        "ans": captcha_solution,
+        "appid": appid
+    }
+
+    try:
+        response = session.post(url, headers=login_headers, data=json.dumps(payload))
+        response.raise_for_status()
+        data = response.json()
+        logger.info(f"Login response untuk {username}: {json.dumps(data, indent=2)}")
+        return data
+    except requests.exceptions.RequestException as e:
+        error_details = {
+            "exception": str(e),
+            "status_code": getattr(e.response, "status_code", "Tidak ada respons"),
+            "headers": getattr(e.response, "headers", "Tidak ada header"),
+            "content": None,
+        }
+        if hasattr(e, "response") and e.response is not None:
+            try:
+                error_details["content"] = e.response.json() if "application/json" in e.response.headers.get("content-type", "") else e.response.text
+            except ValueError:
+                error_details["content"] = "Isi respons bukan JSON atau tidak bisa diparse"
+        logger.error(f"Error saat login untuk {username}: {json.dumps(error_details, indent=2, default=str)}")
+        return error_details.get("content")  # Kembalikan isi respons meskipun error
+
+# Langkah 6: Login semua akun dengan logika proxy, appid per akun, skip jika token ada, retry pada captcha salah, dan log ke txt
+def login_all_accounts(config_file=CONFIG_FILE, max_retries=3, error_log_file="captcha_errors.txt"):
     try:
         with open(config_file, "r") as f:
             config = json.load(f)
@@ -214,11 +235,14 @@ def login_all_accounts(config_file=CONFIG_FILE):
         logger.error("Tidak ada akun di config.json.")
         return
 
-    # Tentukan daftar proxy berdasarkan use_proxy
     proxy_list = get_active_proxies() if use_proxy else [None]
     if use_proxy and not proxy_list:
         logger.error("use_proxy true tetapi tidak ada proxy aktif. Berhenti.")
         return
+
+    if not os.path.exists(error_log_file):
+        with open(error_log_file, "w") as f:
+            f.write("Log Error Captcha Salah\n\n")
 
     for account in config["accounts"]:
         if "email" not in account or "password" not in account or "appid" not in account:
@@ -230,12 +254,12 @@ def login_all_accounts(config_file=CONFIG_FILE):
         appid = account["appid"]
         token = account.get("token", "")
 
-        # Skip akun jika token sudah ada dan bukan string kosong atau placeholder
         if token and token not in ["", "YOUR BEARER TOKEN"]:
             logger.info(f"Token sudah ada untuk {email}. Melewati akun ini.")
             continue
 
         logger.info(f"Memproses login untuk {email} dengan appid {appid}...")
+        account_processed = False
 
         for proxy in proxy_list:
             session = create_session(proxy)
@@ -244,21 +268,46 @@ def login_all_accounts(config_file=CONFIG_FILE):
                 if not puzzle_id:
                     continue
 
-                captcha_file = get_captcha_image(session, puzzle_id, appid)
-                if not captcha_file:
-                    continue
+                retries = 0
+                while retries < max_retries:
+                    captcha_file = get_captcha_image(session, puzzle_id, appid)
+                    if not captcha_file:
+                        break
 
-                captcha_solution = solve_captcha(captcha_file)
-                if not captcha_solution:
-                    continue
+                    captcha_solution = solve_captcha(captcha_file)
+                    if not captcha_solution:
+                        break
 
-                login_response = perform_login(session, puzzle_id, captcha_solution, email, password, appid)
-                if login_response and login_response.get("status"):
-                    logger.info(f"Login berhasil untuk {email} dengan {'proxy ' + proxy if proxy else 'tanpa proxy'}!")
-                    config = update_config_with_token(login_response, config)
+                    login_response = perform_login(session, puzzle_id, captcha_solution, email, password, appid)
+                    logger.debug(f"Raw login response untuk {email}: {login_response}")  # Debugging
+
+                    if login_response and isinstance(login_response, dict) and login_response.get("status"):
+                        logger.info(f"Login berhasil untuk {email} dengan {'proxy ' + proxy if proxy else 'tanpa proxy'}!")
+                        config = update_config_with_token(login_response, config)
+                        account_processed = True
+                        break
+                    else:
+                        # Cek apakah error karena captcha salah
+                        if (login_response and isinstance(login_response, dict) and 
+                            not login_response.get("success", True) and 
+                            login_response.get("message") == "Incorrect answer. Try again!"):
+                            retries += 1
+                            error_message = (f"Email: {email} | Captcha: {captcha_solution} | "
+                                           f"Proxy: {proxy if proxy else 'Tanpa Proxy'} | "
+                                           f"Retry: {retries}/{max_retries}")
+                            logger.info(f"Captcha salah untuk {email}. Retry {retries}/{max_retries}...")
+                            log_to_file(error_log_file, f"ERROR: Incorrect answer - {error_message}")
+                            continue
+                        else:
+                            logger.error(f"Login gagal untuk {email} dengan {'proxy ' + proxy if proxy else 'tanpa proxy'}.")
+                            break
+
+                if account_processed:
                     break
-                else:
-                    logger.error(f"Login gagal untuk {email} dengan {'proxy ' + proxy if proxy else 'tanpa proxy'}.")
+                if retries >= max_retries:
+                    logger.error(f"Gagal login untuk {email} setelah {max_retries} percobaan captcha.")
+                    break
+
             finally:
                 session.close()
 
