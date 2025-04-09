@@ -7,21 +7,17 @@ import telegram
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 import colorlog
-from colorama import init, Fore, Back, Style
 from fake_useragent import UserAgent
 import urllib3
 from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
 from asyncio import Queue
-import itertools
 import argparse
 import multiprocessing
-from multiprocessing import Pool, Manager 
+from multiprocessing import Pool
 
 time.sleep(1)
 
 CONFIG_FILE = "config.json"
-PROXY_FILE = "proxies.txt"
 
 parser = argparse.ArgumentParser(description='DAWN AUTO BOT - Airdrop Insider')
 parser.add_argument('-W', '-w', '--worker', type=int, default=3, help='Number of worker threads')
@@ -70,18 +66,6 @@ def read_config(filename=CONFIG_FILE):
         logging.error(f"Invalid JSON format in '{filename}'.")
         return {}
 
-def read_proxies(filename=PROXY_FILE):
-    proxies = []
-    try:
-        with open(filename, 'r') as file:
-            for line in file:
-                proxy = line.strip()
-                if proxy:
-                    proxies.append(proxy)
-    except FileNotFoundError:
-        logging.error(f"Proxy file '{filename}' not found.")
-    return proxies
-
 def parse_proxy(proxy):
     """Parse proxy string into format for requests."""
     proxy_url = urlparse(proxy)
@@ -108,31 +92,6 @@ def check_proxy(proxy):
     except requests.RequestException:
         return False
 
-def get_active_proxies():
-    """Check all proxies and return a list of active proxies using multithreading."""
-    proxies = read_proxies(PROXY_FILE)
-    active_proxies = []
-
-    with ThreadPoolExecutor(max_workers=200) as executor:
-        futures = [executor.submit(check_proxy, proxy) for proxy in proxies]
-        for future, proxy in zip(futures, proxies):
-            if future.result():
-                active_proxies.append(proxy)
-
-    if active_proxies:
-        logging.success(f"Found {len(active_proxies)} active proxies.")
-        return active_proxies
-    else:
-        logging.error("No active proxies found.")
-        return []
-
-def update_proxies_file(active_proxies):
-    """Update proxies.txt file with only active proxies."""
-    with open(PROXY_FILE, 'w') as file:
-        for proxy in active_proxies:
-            file.write(f"{proxy}\n")
-    logging.success(f"Updated {PROXY_FILE} with {len(active_proxies)} active proxies.")
-
 def create_session(proxy=None):
     session = requests.Session()
     session.mount('http://', HTTPAdapter(pool_connections=10, pool_maxsize=10))
@@ -155,7 +114,7 @@ if use_telegram and (not bot_token or not chat_id):
     exit(1)
 
 bot = telegram.Bot(token=bot_token) if use_telegram else None
-base_keepalive_url = "https://www.aeropres.in/chromeapi/dawn/v1/userreward/keepalive"  # Base URL tanpa appid
+base_keepalive_url = "https://www.aeropres.in/chromeapi/dawn/v1/userreward/keepalive"
 get_points_url = "https://www.aeropres.in/api/atom/v1/userreferral/getpoint"
 extension_id = "fpdkjdnhkakefebpekbdhillbhonfjjp"
 _v = "1.1.1"
@@ -227,6 +186,7 @@ def keep_alive(headers, email, session, appid):
     except requests.exceptions.RequestException as e:
         logging.warning(f"Keep alive failed for {email}: {str(e)}")
         return False, f"Request failed: {str(e)}"
+
 # Queue for Telegram messages
 message_queue = Queue()
 
@@ -247,58 +207,69 @@ async def telegram_message(message):
         except Exception as e:
             logging.error(f"Error sending Telegram message: {e}")
 
-def process_account(account, proxy_list, active_proxies):
+def process_account(account):
     email = account["email"]
     token = account["token"]
-    appid = account["appid"]  # Ambil appid dari data akun
+    appid = account["appid"]
+    proxy = account.get("proxy") if use_proxy else None  # Ambil proxy dari akun jika use_proxy True
+
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "User-Agent": ua.random
     }
 
-    session = None  # Inisialisasi session di luar loop
+    logging.info(f"Processing {email} with proxy: {proxy if proxy else 'No proxy'}")
+    session = None
     
     try:
-        for proxy in proxy_list:
-            if session:
-                session.close()  # Tutup session sebelumnya jika ada
-            session = create_session(proxy)
+        # Cek proxy jika ada
+        if proxy and not check_proxy(proxy):
+            logging.error(f"Proxy {proxy} for {email} is not active.")
+            message = (
+                "⚠️ *Failure Notification* ⚠️\n\n"
+                f"👤 *Account:* {email}\n\n"
+                "❌ *Status:* Proxy Not Active\n\n"
+                f"🛠️ *Proxy:* {proxy}\n\n"
+                "⚙️ *Action Required:* Please check proxy status.\n\n"
+                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+            )
+            return email, False, message
 
-            success, status_message = keep_alive(headers, email, session, appid)
+        session = create_session(proxy)
 
-            if success:
-                points = total_points(headers, session)
-                message = (
-                    "✅ *🌟 Success Notification 🌟* ✅\n\n"
-                    f"👤 *Account:* {email}\n\n"
-                    f"💰 *Points Earned:* {points}\n\n"
-                    f"📢 *Message:* {status_message}\n\n"
-                    f"🛠️ *Proxy Used:* {proxy}\n\n"
-                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                )
-                logging.success(f"Success keep alive for {email} with proxy {proxy} and appid {appid}. Reason: {status_message}")
-                return email, True, message
-            else:
-                logging.error(f"Failed keep alive for {email} with proxy {proxy} and appid {appid}. Reason: {status_message}")
-        
-        # Jika semua proxy gagal
-        message = (
-            "⚠️ *Failure Notification* ⚠️\n\n"
-            f"👤 *Account:* {email}\n\n"
-            "❌ *Status:* Keep Alive Failed for All Proxies\n\n"
-            "⚙️ *Action Required:* Please check proxy list or account status.\n\n"
-            "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-        )
-        return email, False, message
+        success, status_message = keep_alive(headers, email, session, appid)
+
+        if success:
+            points = total_points(headers, session)
+            message = (
+                "✅ *🌟 Success Notification 🌟* ✅\n\n"
+                f"👤 *Account:* {email}\n\n"
+                f"💰 *Points Earned:* {points}\n\n"
+                f"📢 *Message:* {status_message}\n\n"
+                f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+            )
+            logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+            return email, True, message
+        else:
+            logging.error(f"Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+            message = (
+                "⚠️ *Failure Notification* ⚠️\n\n"
+                f"👤 *Account:* {email}\n\n"
+                "❌ *Status:* Keep Alive Failed\n\n"
+                f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                "⚙️ *Action Required:* Please check account or proxy status.\n\n"
+                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+            )
+            return email, False, message
     finally:
         if session:
-            session.close()  # Pastikan session ditutup
+            session.close()
 
 async def main():
     accounts = read_account()
-    active_proxies = get_active_proxies()
-    update_proxies_file(active_proxies)
+    logging.info(f"Total accounts to process: {len(accounts)}")
 
     # Start the Telegram message worker
     telegram_task = asyncio.create_task(telegram_worker())
@@ -306,16 +277,9 @@ async def main():
     while True:
         pool = None
         try:
-            # Buat pool untuk memproses akun secara parallel
             pool = Pool(processes=args.worker)
-            
-            # Siapkan parameter untuk setiap akun
-            process_params = [(account, active_proxies, active_proxies) for account in accounts]
-            
-            # Proses akun secara parallel
-            results = pool.starmap(process_account, process_params)
+            results = pool.map(process_account, accounts)
 
-            # Kirim pesan Telegram untuk setiap hasil
             for email, success, message in results:
                 await queue_telegram_message(message)
                 logging.info(f"Account {email} completed with status: {'success' if success else 'failed'}")
