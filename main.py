@@ -202,7 +202,7 @@ def total_points(headers, session):
         logging.error(f"Error fetching points: {e}")
     return 0
 
-def keep_alive(headers, email, session, appid, max_retries=2):
+def keep_alive(headers, email, session, appid):
     keepalive_url = f"{base_keepalive_url}?appid={appid}"
     keepalive_payload = {
         "username": email,
@@ -213,29 +213,20 @@ def keep_alive(headers, email, session, appid, max_retries=2):
 
     headers["User-Agent"] = ua.random
 
-    for attempt in range(max_retries):
-        try:
-            response = session.post(keepalive_url, headers=headers, json=keepalive_payload, verify=False)
-            response.raise_for_status()
+    try:
+        response = session.post(keepalive_url, headers=headers, json=keepalive_payload, verify=False)
+        response.raise_for_status()
 
-            json_response = response.json()
-            if 'message' in json_response:
-                return True, json_response['message']
-            else:
-                logging.warning(f"Attempt {attempt + 1}/{max_retries} for {email}: Message not found in response")
-                if attempt < max_retries - 1:
-                    time.sleep(2)  # Delay 2 detik sebelum retry
-                continue
+        json_response = response.json()
+        if 'message' in json_response:
+            return True, json_response['message']
+        else:
+            logging.warning(f"Message not found in response for {email}")
+            return False, "Message not found in response"
 
-        except requests.exceptions.RequestException as e:
-            logging.warning(f"Attempt {attempt + 1}/{max_retries} for {email} failed: {str(e)}")
-            if attempt < max_retries - 1:
-                time.sleep(2)  # Delay 2 detik sebelum retry
-            continue
-
-    # Jika semua retry gagal
-    return False, "Failed after all retries"
-
+    except requests.exceptions.RequestException as e:
+        logging.warning(f"Keep alive failed for {email}: {str(e)}")
+        return False, f"Request failed: {str(e)}"
 # Queue for Telegram messages
 message_queue = Queue()
 
