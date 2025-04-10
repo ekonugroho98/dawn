@@ -207,7 +207,7 @@ async def telegram_message(message):
         except Exception as e:
             logging.error(f"Error sending Telegram message: {e}")
 
-def process_account(account):
+def process_account(account, max_retries=3, retry_delay=5):
     email = account["email"]
     token = account["token"]
     appid = account["appid"]
@@ -221,51 +221,87 @@ def process_account(account):
 
     logging.info(f"Processing {email} with proxy: {proxy if proxy else 'No proxy'}")
     session = None
-    
-    try:
-        # Cek proxy jika ada
-        if proxy and not check_proxy(proxy):
-            logging.error(f"Proxy {proxy} for {email} is not active.")
-            message = (
-                "⚠️ *Failure Notification* ⚠️\n\n"
-                f"👤 *Account:* {email}\n\n"
-                "❌ *Status:* Proxy Not Active\n\n"
-                f"🛠️ *Proxy:* {proxy}\n\n"
-                "⚙️ *Action Required:* Please check proxy status.\n\n"
-                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-            )
-            return email, False, message
+    attempt = 0
 
-        session = create_session(proxy)
+    while attempt < max_retries:
+        attempt += 1
+        try:
+            # Cek proxy jika ada
+            if proxy and not check_proxy(proxy):
+                logging.error(f"Attempt {attempt}/{max_retries}: Proxy {proxy} for {email} is not active.")
+                if attempt == max_retries:
+                    message = (
+                        "⚠️ *Failure Notification* ⚠️\n\n"
+                        f"👤 *Account:* {email}\n\n"
+                        "❌ *Status:* Proxy Not Active\n\n"
+                        f"🛠️ *Proxy:* {proxy}\n\n"
+                        f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
+                        "⚙️ *Action Required:* Please check proxy status.\n\n"
+                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                    )
+                    return email, False, message
+                else:
+                    logging.info(f"Retrying after {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    continue
 
-        success, status_message = keep_alive(headers, email, session, appid)
+            session = create_session(proxy)
 
-        if success:
-            points = total_points(headers, session)
-            message = (
-                "✅ *🌟 Success Notification 🌟* ✅\n\n"
-                f"👤 *Account:* {email}\n\n"
-                f"💰 *Points Earned:* {points}\n\n"
-                f"📢 *Message:* {status_message}\n\n"
-                f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-            )
-            logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
-            return email, True, message
-        else:
-            logging.error(f"Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
-            message = (
-                "⚠️ *Failure Notification* ⚠️\n\n"
-                f"👤 *Account:* {email}\n\n"
-                "❌ *Status:* Keep Alive Failed\n\n"
-                f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                "⚙️ *Action Required:* Please check account or proxy status.\n\n"
-                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-            )
-            return email, False, message
-    finally:
-        if session:
-            session.close()
+            success, status_message = keep_alive(headers, email, session, appid)
+
+            if success:
+                points = total_points(headers, session)
+                message = (
+                    "✅ *🌟 Success Notification 🌟* ✅\n\n"
+                    f"👤 *Account:* {email}\n\n"
+                    f"💰 *Points Earned:* {points}\n\n"
+                    f"📢 *Message:* {status_message}\n\n"
+                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                )
+                logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+                return email, True, message
+            else:
+                logging.error(f"Attempt {attempt}/{max_retries}: Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+                if attempt == max_retries:
+                    message = (
+                        "⚠️ *Failure Notification* ⚠️\n\n"
+                        f"👤 *Account:* {email}\n\n"
+                        "❌ *Status:* Keep Alive Failed\n\n"
+                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                        f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
+                        "⚙️ *Action Required:* Please check account or proxy status.\n\n"
+                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                    )
+                    return email, False, message
+                else:
+                    logging.info(f"Retrying after {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    continue
+
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Attempt {attempt}/{max_retries}: Network error for {email}: {str(e)}")
+            if attempt == max_retries:
+                message = (
+                    "⚠️ *Failure Notification* ⚠️\n\n"
+                    f"👤 *Account:* {email}\n\n"
+                    "❌ *Status:* Network Error\n\n"
+                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                    f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
+                    "⚙️ *Action Required:* Check network or proxy.\n\n"
+                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                )
+                return email, False, message
+            else:
+                logging.info(f"Retrying after {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                continue
+        finally:
+            if session:
+                session.close()
+
+    # Jika semua percobaan gagal (seharusnya tidak sampai sini karena ditangani di dalam loop)
+    return email, False, "Unexpected error after retries."
 
 async def main():
     accounts = read_account()
