@@ -280,7 +280,22 @@ def process_account(account, max_retries=3, retry_delay=5):
                     continue
 
         except requests.exceptions.RequestException as e:
-            logging.error(f"Attempt {attempt}/{max_retries}: Network error for {email}: {str(e)}")
+            error_message = str(e)
+            # Cek apakah error adalah 502 Bad Gateway
+            if "502 Server Error: Bad Gateway" in error_message:
+                logging.error(f"Attempt {attempt}/{max_retries}: 502 Server Error for {email}: {error_message}")
+                message = (
+                    "⚠️ *Failure Notification* ⚠️\n\n"
+                    f"👤 *Account:* {email}\n\n"
+                    "❌ *Status:* 502 Server Error - Bad Gateway\n\n"
+                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                    "⚙️ *Action Required:* Server issue, no retries attempted.\n\n"
+                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                )
+                return email, False, message
+
+            # Jika bukan 502, lakukan retry
+            logging.error(f"Attempt {attempt}/{max_retries}: Network error for {email}: {error_message}")
             if attempt == max_retries:
                 message = (
                     "⚠️ *Failure Notification* ⚠️\n\n"
