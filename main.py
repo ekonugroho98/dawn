@@ -117,7 +117,7 @@ bot = telegram.Bot(token=bot_token) if use_telegram else None
 base_keepalive_url = "https://www.aeropres.in/chromeapi/dawn/v1/userreward/keepalive"
 get_points_url = "https://www.aeropres.in/api/atom/v1/userreferral/getpoint"
 extension_id = "fpdkjdnhkakefebpekbdhillbhonfjjp"
-_v = "1.1.1"
+_v = "1.1.5"
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 ua = UserAgent()
