@@ -9,9 +9,14 @@ import colorlog
 import urllib3
 from asyncio import Queue
 from multiprocessing import Pool
+from datetime import datetime
 from fake_useragent import UserAgent
 
 CONFIG_FILE = "config.json"
+ERROR_LOG_FILE = "log-error.txt"
+
+# Inisialisasi UserAgent untuk menghasilkan User-Agent acak
+ua = UserAgent()
 
 # Setup logging with color
 log_colors = {
@@ -108,7 +113,7 @@ extension_id = "fpdkjdnhkakefebpekbdhillbhonfjjp"
 _v = "1.1.5"
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-ua = UserAgent()
+
 def read_account(filename="config.json"):
     try:
         with open(filename, 'r') as file:
@@ -124,7 +129,10 @@ def read_account(filename="config.json"):
 
 def total_points(headers, session):
     try:
+        headers["User-Agent"] = ua.random  # Gunakan User-Agent acak
+        logging.info(f"Fetching points from {get_points_url}")
         response = session.get(get_points_url, headers=headers, verify=False, timeout=30)
+        logging.info(f"Points response status: {response.status_code}, content: {response.text}")
         response.raise_for_status()
 
         json_response = response.json()
@@ -146,6 +154,27 @@ def total_points(headers, session):
         pass  # Abaikan semua error tanpa logging
     return 0
 
+def log_curl_to_file(email, headers, keepalive_url, keepalive_payload, proxy, reason):
+    """Log error details as a curl command to log-error.txt."""
+    curl_command = f"curl"
+    if proxy:
+        curl_command += f" --proxy '{proxy}'"
+    curl_command += f" '{keepalive_url}'"
+    for key, value in headers.items():
+        curl_command += f" -H '{key}: {value}'"
+    curl_command += f" --data-raw '{json.dumps(keepalive_payload)}'"
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = (
+        f"[{timestamp}] Error for {email}\n"
+        f"Reason: {reason}\n"
+        f"{curl_command}\n"
+        f"---------------------------------------\n"
+    )
+
+    with open(ERROR_LOG_FILE, "a") as f:
+        f.write(log_entry)
+
 def keep_alive(headers, email, session, appid):
     keepalive_url = f"{base_keepalive_url}?appid={appid}"
     keepalive_payload = {
@@ -155,23 +184,31 @@ def keep_alive(headers, email, session, appid):
         "_v": _v
     }
 
-    headers["User-Agent"] = ua.random
-    logging.info(f"Sending keepalive request to {keepalive_url} with headers: {headers}, payload: {keepalive_payload}, proxies: {session.proxies}")
-
+    headers["User-Agent"] = ua.random  # Gunakan User-Agent acak
     try:
         response = session.post(keepalive_url, headers=headers, json=keepalive_payload, verify=False, timeout=30)
         logging.info(f"Keepalive response status: {response.status_code}, content: {response.text}")
         response.raise_for_status()
 
         json_response = response.json()
+        # Periksa message di dalam data.message
         if isinstance(json_response.get("data"), dict) and "message" in json_response["data"]:
             return True, json_response["data"]["message"]
         else:
-            logging.warning(f"Message not found in response for {email}")
-            return False, "Message not found in response"
+            reason = f"Message key not found in response data: {json_response}"
+            logging.warning(reason)
+            log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
+            return False, "Message key not found in response data"
     except requests.exceptions.RequestException as e:
-        logging.warning(f"Keep alive failed for {email}: {str(e)}")
-        return False, f"Request failed: {str(e)}"
+        reason = f"Request failed: {str(e)}"
+        logging.warning(reason)
+        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
+        return False, reason
+    except ValueError as e:
+        reason = f"Invalid JSON response: {str(e)}, content: {response.text}"
+        logging.error(reason)
+        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
+        return False, reason
 
 # Queue for Telegram messages
 message_queue = Queue()
@@ -293,7 +330,7 @@ async def main():
     while True:
         pool = None
         try:
-            pool = Pool(processes=10)  # Jalankan 2 akun secara bersamaan
+            pool = Pool(processes=2)  # Jalankan 2 akun secara bersamaan
             results = pool.map(process_account, accounts)
 
             for email, success, message in results:
