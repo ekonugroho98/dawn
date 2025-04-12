@@ -114,8 +114,8 @@ if use_telegram and (not bot_token or not chat_id):
     exit(1)
 
 bot = telegram.Bot(token=bot_token) if use_telegram else None
-base_keepalive_url = "https://www.aeropres.in/chromeapi/dawn/v1/userreward/keepalive"
-get_points_url = "https://www.aeropres.in/api/atom/v1/userreferral/getpoint"
+base_keepalive_url = "ttps://ext-api.dawninternet.com/chromeapi/dawn/v1/userreward/keepalive"
+get_points_url = "https://ext-api.dawninternet.com/api/atom/v1/userreferral/getpoint"
 extension_id = "fpdkjdnhkakefebpekbdhillbhonfjjp"
 _v = "1.1.5"
 
