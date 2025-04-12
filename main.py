@@ -4,24 +4,14 @@ import logging
 import time
 import asyncio
 import telegram
-from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 import colorlog
-from fake_useragent import UserAgent
 import urllib3
-from requests.adapters import HTTPAdapter
 from asyncio import Queue
-import argparse
-import multiprocessing
 from multiprocessing import Pool
-
-time.sleep(1)
+from fake_useragent import UserAgent
 
 CONFIG_FILE = "config.json"
-
-parser = argparse.ArgumentParser(description='DAWN AUTO BOT - Airdrop Insider')
-parser.add_argument('-W', '-w', '--worker', type=int, default=3, help='Number of worker threads')
-args = parser.parse_args()
 
 # Setup logging with color
 log_colors = {
@@ -87,18 +77,16 @@ def check_proxy(proxy):
     proxies = parse_proxy(proxy)
     test_url = "http://httpbin.org/ip"
     try:
-        response = requests.get(test_url, proxies=proxies, timeout=5)
+        response = requests.get(test_url, proxies=proxies, timeout=30)
         return response.status_code == 200
     except requests.RequestException:
         return False
 
 def create_session(proxy=None):
     session = requests.Session()
-    session.mount('http://', HTTPAdapter(pool_connections=10, pool_maxsize=10))
-    session.mount('https://', HTTPAdapter(pool_connections=10, pool_maxsize=10))
     if proxy:
         proxies = parse_proxy(proxy)
-        logging.info(f"Using proxy: {proxy}")
+        logging.info(f"Configuring session with proxy: {proxy}")
         session.proxies.update(proxies)
     return session
 
@@ -121,7 +109,6 @@ _v = "1.1.5"
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 ua = UserAgent()
-
 def read_account(filename="config.json"):
     try:
         with open(filename, 'r') as file:
@@ -137,7 +124,7 @@ def read_account(filename="config.json"):
 
 def total_points(headers, session):
     try:
-        response = session.get(get_points_url, headers=headers, verify=False)
+        response = session.get(get_points_url, headers=headers, verify=False, timeout=30)
         response.raise_for_status()
 
         json_response = response.json()
@@ -155,10 +142,8 @@ def total_points(headers, session):
                 referral_point_data.get("commission", 0)
             )
             return total_points
-        else:
-            logging.warning(f"Warning: {json_response.get('message', 'Unknown error when fetching points')}")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching points: {e}")
+    except (requests.exceptions.RequestException, ValueError, KeyError):
+        pass  # Abaikan semua error tanpa logging
     return 0
 
 def keep_alive(headers, email, session, appid):
@@ -171,18 +156,19 @@ def keep_alive(headers, email, session, appid):
     }
 
     headers["User-Agent"] = ua.random
+    logging.info(f"Sending keepalive request to {keepalive_url} with headers: {headers}, payload: {keepalive_payload}, proxies: {session.proxies}")
 
     try:
-        response = session.post(keepalive_url, headers=headers, json=keepalive_payload, verify=False)
+        response = session.post(keepalive_url, headers=headers, json=keepalive_payload, verify=False, timeout=30)
+        logging.info(f"Keepalive response status: {response.status_code}, content: {response.text}")
         response.raise_for_status()
 
         json_response = response.json()
-        if 'message' in json_response:
-            return True, json_response['message']
+        if isinstance(json_response.get("data"), dict) and "message" in json_response["data"]:
+            return True, json_response["data"]["message"]
         else:
             logging.warning(f"Message not found in response for {email}")
             return False, "Message not found in response"
-
     except requests.exceptions.RequestException as e:
         logging.warning(f"Keep alive failed for {email}: {str(e)}")
         return False, f"Request failed: {str(e)}"
@@ -211,22 +197,20 @@ def process_account(account, max_retries=3, retry_delay=5):
     email = account["email"]
     token = account["token"]
     appid = account["appid"]
-    proxy = account.get("proxy") if use_proxy else None  # Ambil proxy dari akun jika use_proxy True
+    proxy = account.get("proxy") if use_proxy else None
 
     headers = {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "User-Agent": ua.random
+        "Content-Type": "application/json"
     }
 
     logging.info(f"Processing {email} with proxy: {proxy if proxy else 'No proxy'}")
-    session = None
     attempt = 0
 
     while attempt < max_retries:
         attempt += 1
+        session = None
         try:
-            # Cek proxy jika ada
             if proxy and not check_proxy(proxy):
                 logging.error(f"Attempt {attempt}/{max_retries}: Proxy {proxy} for {email} is not active.")
                 if attempt == max_retries:
@@ -246,7 +230,6 @@ def process_account(account, max_retries=3, retry_delay=5):
                     continue
 
             session = create_session(proxy)
-
             success, status_message = keep_alive(headers, email, session, appid)
 
             if success:
@@ -278,23 +261,8 @@ def process_account(account, max_retries=3, retry_delay=5):
                     logging.info(f"Retrying after {retry_delay} seconds...")
                     time.sleep(retry_delay)
                     continue
-
         except requests.exceptions.RequestException as e:
             error_message = str(e)
-            # Cek apakah error adalah 502 Bad Gateway
-            if "502 Server Error: Bad Gateway" in error_message:
-                logging.error(f"Attempt {attempt}/{max_retries}: 502 Server Error for {email}: {error_message}")
-                message = (
-                    "⚠️ *Failure Notification* ⚠️\n\n"
-                    f"👤 *Account:* {email}\n\n"
-                    "❌ *Status:* 502 Server Error - Bad Gateway\n\n"
-                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                    "⚙️ *Action Required:* Server issue, no retries attempted.\n\n"
-                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                )
-                return email, False, message
-
-            # Jika bukan 502, lakukan retry
             logging.error(f"Attempt {attempt}/{max_retries}: Network error for {email}: {error_message}")
             if attempt == max_retries:
                 message = (
@@ -315,9 +283,6 @@ def process_account(account, max_retries=3, retry_delay=5):
             if session:
                 session.close()
 
-    # Jika semua percobaan gagal (seharusnya tidak sampai sini karena ditangani di dalam loop)
-    return email, False, "Unexpected error after retries."
-
 async def main():
     accounts = read_account()
     logging.info(f"Total accounts to process: {len(accounts)}")
@@ -328,7 +293,7 @@ async def main():
     while True:
         pool = None
         try:
-            pool = Pool(processes=args.worker)
+            pool = Pool(processes=10)  # Jalankan 2 akun secara bersamaan
             results = pool.map(process_account, accounts)
 
             for email, success, message in results:
@@ -337,7 +302,6 @@ async def main():
 
             logging.info(f"All accounts processed. Waiting {poll_interval} seconds before next cycle.")
             await asyncio.sleep(poll_interval)
-
         except Exception as e:
             logging.error(f"Error in main loop: {e}")
             await asyncio.sleep(10)
@@ -348,7 +312,6 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        multiprocessing.freeze_support()
         asyncio.run(main())
     except KeyboardInterrupt:
         logging.info("Script stopped by user.")
