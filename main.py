@@ -187,12 +187,12 @@ def keep_alive(headers, email, session, appid):
     headers["User-Agent"] = ua.random  # Gunakan User-Agent acak
     try:
         response = session.post(keepalive_url, headers=headers, json=keepalive_payload, verify=False, timeout=30)
-        logging.info(f"Keepalive response status: {response.status_code}, content: {response.text}")
         response.raise_for_status()
 
         json_response = response.json()
         # Periksa message di dalam data.message
         if isinstance(json_response.get("data"), dict) and "message" in json_response["data"]:
+            logging.success(f"Keepalive response status: {response.status_code}, content: {response.text}")
             return True, json_response["data"]["message"]
         else:
             reason = f"Message key not found in response data: {json_response}"
@@ -201,12 +201,10 @@ def keep_alive(headers, email, session, appid):
             return False, "Message key not found in response data"
     except requests.exceptions.RequestException as e:
         reason = f"Request failed: {str(e)}"
-        logging.warning(reason)
         log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
         return False, reason
     except ValueError as e:
         reason = f"Invalid JSON response: {str(e)}, content: {response.text}"
-        logging.error(reason)
         log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
         return False, reason
 
