@@ -130,9 +130,7 @@ def read_account(filename="config.json"):
 def total_points(headers, session):
     try:
         headers["User-Agent"] = ua.random  # Gunakan User-Agent acak
-        logging.info(f"Fetching points from {get_points_url}")
         response = session.get(get_points_url, headers=headers, verify=False, timeout=30)
-        logging.info(f"Points response status: {response.status_code}, content: {response.text}")
         response.raise_for_status()
 
         json_response = response.json()
