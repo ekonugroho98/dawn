@@ -192,7 +192,7 @@ def keep_alive(headers, email, session, appid):
         json_response = response.json()
         # Periksa message di dalam data.message
         if isinstance(json_response.get("data"), dict) and "message" in json_response["data"]:
-            logging.success(f"Keepalive response status: {response.status_code}, content: {response.text}")
+            # logging.success(f"Keepalive response status: {response.status_code}, content: {response.text}")
             return True, json_response["data"]["message"]
         else:
             reason = f"Message key not found in response data: {json_response}"
@@ -239,7 +239,6 @@ def process_account(account, max_retries=3, retry_delay=5):
         "Content-Type": "application/json"
     }
 
-    logging.info(f"Processing {email} with proxy: {proxy if proxy else 'No proxy'}")
     attempt = 0
 
     while attempt < max_retries:
@@ -269,15 +268,15 @@ def process_account(account, max_retries=3, retry_delay=5):
 
             if success:
                 points = total_points(headers, session)
-                message = (
-                    "✅ *🌟 Success Notification 🌟* ✅\n\n"
-                    f"👤 *Account:* {email}\n\n"
-                    f"💰 *Points Earned:* {points}\n\n"
-                    f"📢 *Message:* {status_message}\n\n"
-                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                )
-                logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+                # message = (
+                #     "✅ *🌟 Success Notification 🌟* ✅\n\n"
+                #     f"👤 *Account:* {email}\n\n"
+                #     f"💰 *Points Earned:* {points}\n\n"
+                #     f"📢 *Message:* {status_message}\n\n"
+                #     f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                #     "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                # )
+                # logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
                 return email, True, message
             else:
                 logging.error(f"Attempt {attempt}/{max_retries}: Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
