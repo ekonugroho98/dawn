@@ -1,3 +1,4 @@
 config.json
 captcha_errors.txt
 proxies.txt
+log-*.txt
