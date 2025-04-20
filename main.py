@@ -265,7 +265,7 @@ def process_account(account, max_retries=3, retry_delay=5):
             success, status_message = keep_alive(headers, email, session, appid)
 
             if success:
-                points = total_points(headers, session)
+                # points = total_points(headers, session)
                 # message = (
                 #     "✅ *🌟 Success Notification 🌟* ✅\n\n"
                 #     f"👤 *Account:* {email}\n\n"

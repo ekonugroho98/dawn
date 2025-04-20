@@ -6,3 +6,4 @@ colorama
 fake-useragent
 pysocks
 urllib3
+filelock
