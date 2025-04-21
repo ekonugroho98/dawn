@@ -236,15 +236,11 @@ def process_account(account, config_file, log_error_file, use_proxy, bot=None, c
 
             if success:
                 # points = total_points(headers, session, get_points_url)
-                # message = (
-                #     "✅ *🌟 Success Notification 🌟* ✅\n\n"
-                #     f"👤 *Account:* {email}\n\n"
-                #     f"💰 *Points Earned:* {points}\n\n"
-                #     f"📢 *Message:* {status_message}\n\n"
-                #     f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                #     "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                # )
-                logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+                message = (
+                    "✅ *🌟 Success Notification 🌟* ✅\n\n"
+                    f"👤 *Account:* {email}\n\n"
+                )
+                logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'}. Reason: {status_message}")
                 return email, True, message
             else:
                 logging.error(f"Attempt {attempt}/{max_retries}: Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
