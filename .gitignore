@@ -4,3 +4,4 @@ captcha_errors.txt
 proxies.txt
 log-*.txt
 invalid_password.txt
+point/
