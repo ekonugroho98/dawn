@@ -1,3 +1,4 @@
+# core_keep_alive.py
 import requests
 import json
 import logging
@@ -11,9 +12,6 @@ from asyncio import Queue
 from multiprocessing import Pool
 from datetime import datetime
 from fake_useragent import UserAgent
-
-CONFIG_FILE = "config_2.json"
-ERROR_LOG_FILE = "log_2-error.txt"
 
 # Inisialisasi UserAgent untuk menghasilkan User-Agent acak
 ua = UserAgent()
@@ -49,7 +47,7 @@ def log_success(message, *args, **kwargs):
 
 logging.success = log_success
 
-def read_config(filename=CONFIG_FILE):
+def read_config(filename):
     try:
         with open(filename, 'r') as file:
             config = json.load(file)
@@ -95,26 +93,7 @@ def create_session(proxy=None):
         session.proxies.update(proxies)
     return session
 
-config = read_config(CONFIG_FILE)
-bot_token = config.get("telegram_bot_token")
-chat_id = config.get("telegram_chat_id")
-use_proxy = config.get("use_proxy", False)
-use_telegram = config.get("use_telegram", False)
-poll_interval = config.get("poll_interval", 120)  # Default to 120 seconds
-
-if use_telegram and (not bot_token or not chat_id):
-    logging.error("Missing 'bot_token' or 'chat_id' in 'config.json'.")
-    exit(1)
-
-bot = telegram.Bot(token=bot_token) if use_telegram else None
-base_keepalive_url = "https://ext-api.dawninternet.com/chromeapi/dawn/v1/userreward/keepalive"
-get_points_url = "https://ext-api.dawninternet.com/api/atom/v1/userreferral/getpoint"
-extension_id = "fpdkjdnhkakefebpekbdhillbhonfjjp"
-_v = "1.1.5"
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-def read_account(filename="config.json"):
+def read_account(filename):
     try:
         with open(filename, 'r') as file:
             data = json.load(file)
@@ -127,7 +106,7 @@ def read_account(filename="config.json"):
         logging.error(f"Invalid JSON format in '{filename}'.")
         return []
 
-def total_points(headers, session):
+def total_points(headers, session, get_points_url):
     try:
         headers["User-Agent"] = ua.random  # Gunakan User-Agent acak
         response = session.get(get_points_url, headers=headers, verify=False, timeout=30)
@@ -152,7 +131,7 @@ def total_points(headers, session):
         pass  # Abaikan semua error tanpa logging
     return 0
 
-def log_curl_to_file(email, headers, keepalive_url, keepalive_payload, proxy, reason):
+def log_curl_to_file(email, headers, keepalive_url, keepalive_payload, proxy, reason, log_error_file):
     """Log error details as a curl command to log-error.txt."""
     curl_command = f"curl"
     if proxy:
@@ -170,10 +149,10 @@ def log_curl_to_file(email, headers, keepalive_url, keepalive_payload, proxy, re
         f"---------------------------------------\n"
     )
 
-    with open(ERROR_LOG_FILE, "a") as f:
+    with open(log_error_file, "a") as f:
         f.write(log_entry)
 
-def keep_alive(headers, email, session, appid):
+def keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v):
     keepalive_url = f"{base_keepalive_url}?appid={appid}"
     keepalive_payload = {
         "username": email,
@@ -190,43 +169,30 @@ def keep_alive(headers, email, session, appid):
         json_response = response.json()
         # Periksa message di dalam data.message
         if isinstance(json_response.get("data"), dict) and "message" in json_response["data"]:
-            # logging.success(f"Keepalive response status: {response.status_code}, content: {response.text}")
             return True, json_response["data"]["message"]
         else:
             reason = f"Message key not found in response data: {json_response}"
             logging.warning(reason)
-            log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
+            log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
             return False, "Message key not found in response data"
     except requests.exceptions.RequestException as e:
         reason = f"Request failed: {str(e)}"
-        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
+        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
         return False, reason
     except ValueError as e:
         reason = f"Invalid JSON response: {str(e)}, content: {response.text}"
-        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
+        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
         return False, reason
 
-# Queue for Telegram messages
-message_queue = Queue()
-
-async def telegram_worker():
-    while True:
-        message = await message_queue.get()
-        await telegram_message(message)
-        message_queue.task_done()
-
-async def queue_telegram_message(message):
-    await message_queue.put(message)
-
-async def telegram_message(message):
-    if use_telegram:
+async def telegram_message(bot, chat_id, message):
+    if bot:
         try:
             await bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
             await asyncio.sleep(1)  # Delay of 1 second after sending the message
         except Exception as e:
             logging.error(f"Error sending Telegram message: {e}")
 
-def process_account(account, max_retries=3, retry_delay=5):
+def process_account(account, config_file, log_error_file, use_proxy, bot=None, chat_id=None, max_retries=3, retry_delay=5):
     email = account["email"]
     token = account["token"]
     appid = account["appid"]
@@ -238,6 +204,10 @@ def process_account(account, max_retries=3, retry_delay=5):
     }
 
     attempt = 0
+    base_keepalive_url = "https://ext-api.dawninternet.com/chromeapi/dawn/v1/userreward/keepalive"
+    get_points_url = "https://ext-api.dawninternet.com/api/atom/v1/userreferral/getpoint"
+    extension_id = "fpdkjdnhkakefebpekbdhillbhonfjjp"
+    _v = "1.1.5"
 
     while attempt < max_retries:
         attempt += 1
@@ -262,19 +232,19 @@ def process_account(account, max_retries=3, retry_delay=5):
                     continue
 
             session = create_session(proxy)
-            success, status_message = keep_alive(headers, email, session, appid)
+            success, status_message = keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v)
 
             if success:
-                # points = total_points(headers, session)
-                # message = (
-                #     "✅ *🌟 Success Notification 🌟* ✅\n\n"
-                #     f"👤 *Account:* {email}\n\n"
-                #     f"💰 *Points Earned:* {points}\n\n"
-                #     f"📢 *Message:* {status_message}\n\n"
-                #     f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                #     "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                # )
-                # logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+                points = total_points(headers, session, get_points_url)
+                message = (
+                    "✅ *🌟 Success Notification 🌟* ✅\n\n"
+                    f"👤 *Account:* {email}\n\n"
+                    f"💰 *Points Earned:* {points}\n\n"
+                    f"📢 *Message:* {status_message}\n\n"
+                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                )
+                logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
                 return email, True, message
             else:
                 logging.error(f"Attempt {attempt}/{max_retries}: Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
@@ -315,21 +285,46 @@ def process_account(account, max_retries=3, retry_delay=5):
             if session:
                 session.close()
 
-async def main():
-    accounts = read_account()
+async def run_keep_alive(config_file, log_error_file, poll_interval=120):
+    config = read_config(config_file)
+    bot_token = config.get("telegram_bot_token")
+    chat_id = config.get("telegram_chat_id")
+    use_proxy = config.get("use_proxy", False)
+    use_telegram = config.get("use_telegram", False)
+    poll_interval = config.get("poll_interval", poll_interval)
+
+    if use_telegram and (not bot_token or not chat_id):
+        logging.error("Missing 'bot_token' or 'chat_id' in config.")
+        return
+
+    bot = telegram.Bot(token=bot_token) if use_telegram else None
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    message_queue = Queue()
+
+    async def telegram_worker():
+        while True:
+            message = await message_queue.get()
+            await telegram_message(bot, chat_id, message)
+            message_queue.task_done()
+
+    accounts = read_account(config_file)
     logging.info(f"Total accounts to process: {len(accounts)}")
 
-    # Start the Telegram message worker
-    telegram_task = asyncio.create_task(telegram_worker())
+    telegram_task = asyncio.create_task(telegram_worker()) if use_telegram else None
 
     while True:
         pool = None
         try:
             pool = Pool(processes=2)  # Jalankan 2 akun secara bersamaan
-            results = pool.map(process_account, accounts)
+            results = pool.starmap(process_account, [
+                (account, config_file, log_error_file, use_proxy, bot, chat_id)
+                for account in accounts
+            ])
 
             for email, success, message in results:
-                await queue_telegram_message(message)
+                if use_telegram:
+                    await message_queue.put(message)
                 logging.info(f"Account {email} completed with status: {'success' if success else 'failed'}")
 
             logging.info(f"All accounts processed. Waiting {poll_interval} seconds before next cycle.")
@@ -343,11 +338,8 @@ async def main():
                 pool.join()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logging.info("Script stopped by user.")
-    except Exception as e:
-        logging.error(f"Unexpected error: {e}")
-    finally:
-        logging.info("Cleaning up resources...")
+    import sys
+    if len(sys.argv) != 3:
+        print("Usage: core_keep_alive.py <config_file> <log_error_file>")
+        sys.exit(1)
+    asyncio.run(run_keep_alive(sys.argv[1], sys.argv[2]))
