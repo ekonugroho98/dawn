@@ -289,7 +289,7 @@ def perform_login(session, puzzle_id, captcha_solution, email, password, appid):
         logging.error(f"Login error for {email}: {json.dumps(error_details, indent=2)}")
         return error_details
 
-def re_login(email, password, appid, proxy=None, config_file=None, max_retries=3):
+def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1):
     session = create_session(proxy)
     try:
         for attempt in range(max_retries):
@@ -426,19 +426,7 @@ async def telegram_message(bot, chat_id, message):
             logging.error(f"Error sending Telegram message: {e}")
 
 def should_process_account(account, success_delay):
-    last_success = account.get("last_success")
-    if not last_success:
-        return True
-    try:
-        last_success_time = datetime.fromisoformat(last_success)
-        elapsed = (datetime.now() - last_success_time).total_seconds()
-        if elapsed >= success_delay:
-            return True
-        logging.info(f"Skipping {account['email']} - last success {elapsed/3600:.1f} hours ago, waiting for 24 hours")
-        return False
-    except ValueError:
-        logging.error(f"Invalid last_success format for {account['email']}: {last_success}")
-        return True
+    return True
 
 def process_get_points(account, config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, use_proxy, bot=None, chat_id=None, max_retries=3, retry_delay=5, success_delay=86400):
     email = account["email"]

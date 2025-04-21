@@ -16,7 +16,7 @@ logger = logging.getLogger()
 ua = UserAgent()
 
 # File konfigurasi dan proxy
-CONFIG_FILE = "config_2.json"
+CONFIG_FILE = "config_3.json"
 PROXY_FILE = "proxies.txt"
 
 # Headers dasar untuk API request
@@ -149,7 +149,7 @@ def solve_captcha(image_path):
         return None
 
 # Langkah 5: Update config.json
-def update_config_with_token(login_response, config_data, config_file="config_2.json"):
+def update_config_with_token(login_response, config_data, config_file=CONFIG_FILE):
     if not login_response or not login_response.get("status"):
         logger.error("Tidak ada data login yang valid untuk update config.")
         return config_data
@@ -223,7 +223,7 @@ def perform_login(session, puzzle_id, captcha_solution, username, password, appi
 
 # Langkah 6: Login semua akun dengan logika proxy, appid per akun, skip jika token ada, retry pada captcha salah, dan log ke txt
 # Langkah 6: Login semua akun dengan logika proxy, appid per akun, skip jika token ada, retry pada captcha salah, dan log ke txt
-def login_all_accounts(config_file=CONFIG_FILE, max_retries=3, error_log_file="captcha_errors.txt", invalid_log_file="invalid_password.txt"):
+def login_all_accounts(config_file=CONFIG_FILE, max_retries=1, error_log_file="captcha_errors.txt", invalid_log_file="invalid_password.txt"):
     try:
         with open(config_file, "r") as f:
             config = json.load(f)
