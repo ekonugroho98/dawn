@@ -6,3 +6,5 @@ log-*.txt
 invalid_password.txt
 point/
 captcha/
+total_points.txt
+total_points.txt.lock

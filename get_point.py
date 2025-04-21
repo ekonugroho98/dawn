@@ -63,7 +63,6 @@ def read_config(filename=CONFIG_FILE):
     try:
         with open(filename, 'r') as file:
             config = json.load(file)
-        logging.info(f"Config read successfully: {json.dumps(config, indent=2)}")
         return config
     except FileNotFoundError:
         logging.error(f"Configuration file '{filename}' not found.")
@@ -92,10 +91,9 @@ def update_config_with_token(login_response, config_data, email, config_file=CON
         try:
             with open(config_file, "w") as f:
                 json.dump(config_data, f, indent=2)
-            logging.info(f"Token for {email} updated in {config_file}")
-            logging.info(f"After update, config_data: {json.dumps(config_data, indent=2)}")
+            logging.info(f"Token for {email} updated in")
         except Exception as e:
-            logging.error(f"Failed to update {config_file} for {email}: {e}")
+            logging.error(f"Failed to update for {email}: {e}")
         return config_data
 
 def update_config_with_success(email, config_data, config_file=CONFIG_FILE):
@@ -113,9 +111,9 @@ def update_config_with_success(email, config_data, config_file=CONFIG_FILE):
         try:
             with open(config_file, "w") as f:
                 json.dump(config_data, f, indent=2)
-            logging.info(f"Last success timestamp updated for {email} in {config_file}")
+            logging.info(f"Last success timestamp updated for {email}")
         except Exception as e:
-            logging.error(f"Failed to update {config_file} for {email}: {e}")
+            logging.error(f"Failed to update for {email}: {e}")
         return config_data
 
 def log_total_points(total_points, successful_accounts, total_accounts):
@@ -421,8 +419,8 @@ def total_points(headers, session, appid, email, password, proxy=None, max_login
                 return True, points, "Points retrieved successfully"
             else:
                 message = json_response.get("message", "Unknown error")
-                if message == "Your app session expired, Please login again." and login_attempts < max_login_attempts:
-                    logging.info(f"Session expired for {email}. Attempting re-login (attempt {login_attempts + 1}/{max_login_attempts})...")
+                if message == "Your app session expired, Please login again.":
+                    logging.info(f"Session expired for {email}. Attempting")
                     new_token = re_login(email, password, appid, proxy)
                     if new_token:
                         headers["Authorization"] = f"Bearer {new_token}"
@@ -436,8 +434,8 @@ def total_points(headers, session, appid, email, password, proxy=None, max_login
             try:
                 json_response = json.loads(response_content)
                 message = json_response.get("message", str(e))
-                if message == "Your app session expired, Please login again." and login_attempts < max_login_attempts:
-                    logging.info(f"Session expired for {email}. Attempting re-login (attempt {login_attempts + 1}/{max_login_attempts})...")
+                if message == "Your app session expired, Please login again.":
+                    logging.info(f"Session expired for {email}. Attempting re-login")
                     new_token = re_login(email, password, appid, proxy)
                     if new_token:
                         headers["Authorization"] = f"Bearer {new_token}"
