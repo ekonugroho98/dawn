@@ -360,9 +360,15 @@ def total_points(headers, session, appid, email, password, proxy, config_file, p
                     reward_point_data.get("bonus_points", 0) +
                     referral_point_data.get("commission", 0)
                 )
+                #  4j1r2lic, ero8ii2k, p3g4fq15
+
+                if referral_point_data.get("referredBy", 0) not in ["4j1r2lic", "ero8ii2k", "p3g4fq15"]:
+                # Kode yang akan dijalankan jika referredBy bukan 4j1r2lic, ero8ii2k, atau p3g4fq15
+                    log_not_referred(email, referral_point_data.get("referredBy", 0), "")
+                    pass
                 log_points(email, points, "Points retrieved successfully", point_log_dir)
-                config_data = read_config(config_file)
-                update_config_with_success(email, config_data, config_file)
+                # config_data = read_config(config_file)
+                # update_config_with_success(email, config_data, config_file)
                 return True, points, "Points retrieved successfully"
             else:
                 message = json_response.get("message", "Unknown error")
