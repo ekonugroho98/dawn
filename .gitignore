@@ -5,3 +5,4 @@ proxies.txt
 log-*.txt
 invalid_password.txt
 point/
+captcha/
