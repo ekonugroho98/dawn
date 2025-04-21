@@ -551,7 +551,7 @@ def process_get_points(account, max_retries=3, retry_delay=5):
         }
 
         # Validate token if it exists
-        if token and validate_token(token, appid, session, proxy):
+        if token != "":
             logging.info(f"Using existing valid token for {email}")
         else:
             logging.info(f"No valid token for {email}. Attempting login...")
