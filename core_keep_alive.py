@@ -152,7 +152,7 @@ def log_curl_to_file(email, headers, keepalive_url, keepalive_payload, proxy, re
     with open(log_error_file, "a") as f:
         f.write(log_entry)
 
-def keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v):
+def keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v, log_error_file):
     keepalive_url = f"{base_keepalive_url}?appid={appid}"
     keepalive_payload = {
         "username": email,
@@ -232,18 +232,18 @@ def process_account(account, config_file, log_error_file, use_proxy, bot=None, c
                     continue
 
             session = create_session(proxy)
-            success, status_message = keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v)
+            success, status_message = keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v, log_error_file)
 
             if success:
-                points = total_points(headers, session, get_points_url)
-                message = (
-                    "✅ *🌟 Success Notification 🌟* ✅\n\n"
-                    f"👤 *Account:* {email}\n\n"
-                    f"💰 *Points Earned:* {points}\n\n"
-                    f"📢 *Message:* {status_message}\n\n"
-                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                )
+                # points = total_points(headers, session, get_points_url)
+                # message = (
+                #     "✅ *🌟 Success Notification 🌟* ✅\n\n"
+                #     f"👤 *Account:* {email}\n\n"
+                #     f"💰 *Points Earned:* {points}\n\n"
+                #     f"📢 *Message:* {status_message}\n\n"
+                #     f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                #     "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                # )
                 logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
                 return email, True, message
             else:
