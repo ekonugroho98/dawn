@@ -16,7 +16,7 @@ logger = logging.getLogger()
 ua = UserAgent()
 
 # File konfigurasi dan proxy
-CONFIG_FILE = "config.json"
+CONFIG_FILE = "config_2.json"
 PROXY_FILE = "proxies.txt"
 
 # Headers dasar untuk API request
@@ -149,7 +149,7 @@ def solve_captcha(image_path):
         return None
 
 # Langkah 5: Update config.json
-def update_config_with_token(login_response, config_data, config_file="config.json"):
+def update_config_with_token(login_response, config_data, config_file="config_2.json"):
     if not login_response or not login_response.get("status"):
         logger.error("Tidak ada data login yang valid untuk update config.")
         return config_data
@@ -222,7 +222,108 @@ def perform_login(session, puzzle_id, captcha_solution, username, password, appi
         return error_details.get("content")  # Kembalikan isi respons meskipun error
 
 # Langkah 6: Login semua akun dengan logika proxy, appid per akun, skip jika token ada, retry pada captcha salah, dan log ke txt
-def login_all_accounts(config_file=CONFIG_FILE, max_retries=3, error_log_file="captcha_errors.txt"):
+# Langkah 6: Login semua akun dengan logika proxy, appid per akun, skip jika token ada, retry pada captcha salah, dan log ke txt
+def login_all_accounts(config_file=CONFIG_FILE, max_retries=3, error_log_file="captcha_errors.txt", invalid_log_file="invalid_password.txt"):
+    try:
+        with open(config_file, "r") as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        logger.error(f"File {config_file} tidak ditemukan.")
+        return
+
+    use_proxy = config.get("use_proxy", False)
+    if "accounts" not in config or not config["accounts"]:
+        logger.error("Tidak ada akun di config.json.")
+        return
+
+    proxy_list = get_active_proxies() if use_proxy else [None]
+    if use_proxy and not proxy_list:
+        logger.error("use_proxy true tetapi tidak ada proxy aktif. Berhenti.")
+        return
+
+    # Inisialisasi file log
+    if not os.path.exists(error_log_file):
+        with open(error_log_file, "w") as f:
+            f.write("Log Error Captcha Salah\n\n")
+    if not os.path.exists(invalid_log_file):
+        with open(invalid_log_file, "w") as f:
+            f.write("Log Invalid Username or Password\n\n")
+
+    for account in config["accounts"]:
+        if "email" not in account or "password" not in account or "appid" not in account:
+            logger.error(f"Akun {account.get('email', 'tanpa email')} tidak memiliki email, password, atau appid.")
+            continue
+        
+        email = account["email"]
+        password = account["password"]
+        appid = account["appid"]
+        token = account.get("token", "")
+
+        if token and token not in ["", "YOUR BEARER TOKEN"]:
+            logger.info(f"Token sudah ada untuk {email}. Melewati akun ini.")
+            continue
+
+        logger.info(f"Memproses login untuk {email} dengan appid {appid}...")
+        account_processed = False
+
+        for proxy in proxy_list:
+            session = create_session(proxy)
+            try:
+                puzzle_id = get_puzzle_id(session, appid)
+                if not puzzle_id:
+                    continue
+
+                retries = 0
+                while retries < max_retries:
+                    captcha_file = get_captcha_image(session, puzzle_id, appid)
+                    if not captcha_file:
+                        break
+
+                    captcha_solution = solve_captcha(captcha_file)
+                    if not captcha_solution:
+                        break
+
+                    login_response = perform_login(session, puzzle_id, captcha_solution, email, password, appid)
+                    logger.debug(f"Raw login response untuk {email}: {login_response}")  # Debugging
+
+                    if login_response and isinstance(login_response, dict) and login_response.get("status"):
+                        logger.info(f"Login berhasil untuk {email} dengan {'proxy ' + proxy if proxy else 'tanpa proxy'}!")
+                        config = update_config_with_token(login_response, config)
+                        account_processed = True
+                        break
+                    else:
+                        # Cek apakah error karena captcha salah
+                        if (login_response and isinstance(login_response, dict) and 
+                            not login_response.get("success", True) and 
+                            login_response.get("message") == "Incorrect answer. Try again!"):
+                            retries += 1
+                            error_message = (f"Email: {email} | Captcha: {captcha_solution} | "
+                                           f"Proxy: {proxy if proxy else 'Tanpa Proxy'} | "
+                                           f"Retry: {retries}/{max_retries}")
+                            logger.info(f"Captcha salah untuk {email}. Retry {retries}/{max_retries}...")
+                            log_to_file(error_log_file, f"ERROR: Incorrect answer - {error_message}")
+                            continue
+                        # Cek apakah error karena username/password salah
+                        elif (login_response and isinstance(login_response, dict) and 
+                              login_response.get("message") == "Invalid username or Password!"):
+                            error_message = (f"Email: {email} | Proxy: {proxy if proxy else 'Tanpa Proxy'} | "
+                                            f"Error: Invalid username or Password!")
+                            logger.error(f"Login gagal untuk {email}: Invalid username or Password!")
+                            log_to_file(invalid_log_file, f"ERROR: {error_message}")
+                            account_processed = True  # Tandai akun sebagai diproses untuk skip
+                            break
+                        else:
+                            logger.error(f"Login gagal untuk {email} dengan {'proxy ' + proxy if proxy else 'tanpa proxy'}.")
+                            break
+
+                if account_processed:
+                    break
+                if retries >= max_retries:
+                    logger.error(f"Gagal login untuk {email} setelah {max_retries} percobaan captcha.")
+                    break
+
+            finally:
+                session.close()
     try:
         with open(config_file, "r") as f:
             config = json.load(f)

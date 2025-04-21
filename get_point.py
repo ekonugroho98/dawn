@@ -23,6 +23,7 @@ CAPTCHA_ERROR_LOG = "captcha_errors.txt"
 POINT_LOG_DIR = "point"
 TOTAL_POINT_LOG = "total_point.txt"
 CAPTCHA_DIR = "captcha"
+NOT_REFERRAL_LOG = "not_referral.txt"
 
 # Initialize UserAgent for random User-Agent generation
 ua = UserAgent()
@@ -62,6 +63,7 @@ def read_config(filename=CONFIG_FILE):
     try:
         with open(filename, 'r') as file:
             config = json.load(file)
+        logging.info(f"Config read successfully: {json.dumps(config, indent=2)}")
         return config
     except FileNotFoundError:
         logging.error(f"Configuration file '{filename}' not found.")
@@ -71,7 +73,7 @@ def read_config(filename=CONFIG_FILE):
         return {}
 
 def update_config_with_token(login_response, config_data, email, config_file=CONFIG_FILE):
-    """Update config.json with new token using file lock."""
+    logging.info(f"Before update, config_data: {json.dumps(config_data, indent=2)}")
     lock = FileLock(f"{config_file}.lock")
     with lock:
         if not login_response or not login_response.get("status"):
@@ -91,6 +93,7 @@ def update_config_with_token(login_response, config_data, email, config_file=CON
             with open(config_file, "w") as f:
                 json.dump(config_data, f, indent=2)
             logging.info(f"Token for {email} updated in {config_file}")
+            logging.info(f"After update, config_data: {json.dumps(config_data, indent=2)}")
         except Exception as e:
             logging.error(f"Failed to update {config_file} for {email}: {e}")
         return config_data
@@ -127,6 +130,19 @@ def log_total_points(total_points, successful_accounts, total_accounts):
             logging.info(f"Logged total points ({total_points}) to {TOTAL_POINT_LOG}")
         except Exception as e:
             logging.error(f"Failed to log total points to {TOTAL_POINT_LOG}: {e}")
+
+def log_not_referred(email, referred_by):
+    """Log email to not_referral.txt if referredBy is not 4j1r2lic."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"{timestamp} - Email: {email} - referredBy: {referred_by}\n"
+    lock = FileLock(f"{NOT_REFERRAL_LOG}.lock")
+    with lock:
+        try:
+            with open(NOT_REFERRAL_LOG, "a") as f:
+                f.write(log_entry)
+            logging.info(f"Logged non-referred email {email} with referredBy {referred_by} to {NOT_REFERRAL_LOG}")
+        except Exception as e:
+            logging.error(f"Failed to log to {NOT_REFERRAL_LOG} for {email}: {e}")
 
 def parse_proxy(proxy):
     """Parse proxy string into format for requests."""
@@ -334,16 +350,19 @@ def re_login(email, password, appid, proxy=None, max_retries=3):
             puzzle_id = get_puzzle_id(session, appid)
             if not puzzle_id:
                 logging.error(f"Failed to get puzzle_id for {email}")
+                time.sleep(5)  # Delay before retry
                 continue
 
             captcha_file = get_captcha_image(session, puzzle_id, appid, email)
             if not captcha_file:
                 logging.error(f"Failed to get captcha image for {email}")
+                time.sleep(5)
                 continue
 
             captcha_solution = solve_captcha(captcha_file)
             if not captcha_solution:
                 logging.error(f"Failed to solve captcha for {email}")
+                time.sleep(5)
                 continue
 
             login_response = perform_login(session, puzzle_id, captcha_solution, email, password, appid)
@@ -355,10 +374,12 @@ def re_login(email, password, appid, proxy=None, max_retries=3):
             elif login_response and isinstance(login_response, dict) and login_response.get("message") == "Incorrect answer. Try again!":
                 logging.info(f"Incorrect captcha for {email}. Retry {attempt + 1}/{max_retries}")
                 log_to_file(CAPTCHA_ERROR_LOG, f"ERROR: Incorrect answer - Email: {email} | Captcha: {captcha_solution} | Proxy: {proxy if proxy else 'No Proxy'} | Retry: {attempt + 1}/{max_retries}")
+                time.sleep(5)
                 continue
             else:
                 logging.error(f"Re-login failed for {email}: {login_response}")
-                break
+                time.sleep(5)
+                continue
         logging.error(f"Re-login failed for {email} after {max_retries} attempts")
         return None
     finally:
@@ -369,57 +390,64 @@ def log_to_file(filename, message):
     with open(filename, "a") as f:
         f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
 
-def total_points(headers, session, appid, email, password, proxy=None):
-    """Fetch total points for an account, re-login if session expired."""
+def total_points(headers, session, appid, email, password, proxy=None, max_login_attempts=2):
+    """Fetch total points for an account, validate token, and re-login if necessary."""
     url = f"{get_points_url}?appid={appid}"
-    try:
-        headers["User-Agent"] = ua.random
-        response = session.get(url, headers=headers, verify=False, timeout=30)
-        response.raise_for_status()
+    login_attempts = 0
 
-        json_response = response.json()
-        if json_response.get("status"):
-            reward_point_data = json_response["data"]["rewardPoint"]
-            referral_point_data = json_response["data"]["referralPoint"]
-            points = (
-                reward_point_data.get("points", 0) +
-                reward_point_data.get("registerpoints", 0) +
-                reward_point_data.get("signinpoints", 0) +
-                reward_point_data.get("twitter_x_id_points", 0) +
-                reward_point_data.get("discordid_points", 0) +
-                reward_point_data.get("telegramid_points", 0) +
-                reward_point_data.get("bonus_points", 0) +
-                referral_point_data.get("commission", 0)
-            )
-            log_points(email, points, "Points retrieved successfully")
-            config_data = read_config()
-            update_config_with_success(email, config_data)
-            return True, points, "Points retrieved successfully"
-        else:
-            message = json_response.get("message", "Unknown error")
-            if message == "Your app session expired, Please login again.":
-                logging.info(f"Session expired for {email}. Attempting re-login...")
-                new_token = re_login(email, password, appid, proxy)
-                if new_token:
-                    headers["Authorization"] = f"Bearer {new_token}"
-                    return total_points(headers, session, appid, email, password, proxy)  # Retry with new token
-                return False, 0, "Session expired, re-login failed"
-            return False, 0, f"API status false: {json_response}"
-    except (requests.exceptions.RequestException, ValueError, KeyError) as e:
-        response_content = getattr(e.response, 'text', "No response content")
+    while login_attempts <= max_login_attempts:
+        headers["User-Agent"] = ua.random
         try:
-            json_response = json.loads(response_content)
-            message = json_response.get("message", str(e))
-            if message == "Your app session expired, Please login again.":
-                logging.info(f"Session expired for {email}. Attempting re-login...")
-                new_token = re_login(email, password, appid, proxy)
-                if new_token:
-                    headers["Authorization"] = f"Bearer {new_token}"
-                    return total_points(headers, session, appid, email, password, proxy)  # Retry with new token
-                return False, 0, "Session expired, re-login failed"
-        except json.JSONDecodeError:
-            message = str(e)
-        return False, 0, f"Error fetching points: {message}, Response: {response_content}"
+            response = session.get(url, headers=headers, verify=False, timeout=30)
+            response.raise_for_status()
+
+            json_response = response.json()
+            if json_response.get("status"):
+                reward_point_data = json_response["data"]["rewardPoint"]
+                referral_point_data = json_response["data"]["referralPoint"]
+                points = (
+                    reward_point_data.get("points", 0) +
+                    reward_point_data.get("registerpoints", 0) +
+                    reward_point_data.get("signinpoints", 0) +
+                    reward_point_data.get("twitter_x_id_points", 0) +
+                    reward_point_data.get("discordid_points", 0) +
+                    reward_point_data.get("telegramid_points", 0) +
+                    reward_point_data.get("bonus_points", 0) +
+                    referral_point_data.get("commission", 0)
+                )
+                log_points(email, points, "Points retrieved successfully")
+                config_data = read_config()
+                update_config_with_success(email, config_data)
+                return True, points, "Points retrieved successfully"
+            else:
+                message = json_response.get("message", "Unknown error")
+                if message == "Your app session expired, Please login again." and login_attempts < max_login_attempts:
+                    logging.info(f"Session expired for {email}. Attempting re-login (attempt {login_attempts + 1}/{max_login_attempts})...")
+                    new_token = re_login(email, password, appid, proxy)
+                    if new_token:
+                        headers["Authorization"] = f"Bearer {new_token}"
+                        login_attempts += 1
+                        time.sleep(5)  # Delay before retrying with new token
+                        continue
+                    return False, 0, "Session expired, re-login failed"
+                return False, 0, f"API status false: {json_response}"
+        except (requests.exceptions.RequestException, ValueError, KeyError) as e:
+            response_content = getattr(e.response, 'text', "No response content")
+            try:
+                json_response = json.loads(response_content)
+                message = json_response.get("message", str(e))
+                if message == "Your app session expired, Please login again." and login_attempts < max_login_attempts:
+                    logging.info(f"Session expired for {email}. Attempting re-login (attempt {login_attempts + 1}/{max_login_attempts})...")
+                    new_token = re_login(email, password, appid, proxy)
+                    if new_token:
+                        headers["Authorization"] = f"Bearer {new_token}"
+                        login_attempts += 1
+                        time.sleep(5)
+                        continue
+                    return False, 0, "Session expired, re-login failed"
+            except json.JSONDecodeError:
+                message = str(e)
+            return False, 0, f"Error fetching points: {message}, Response: {response_content}"
 
 def log_curl_to_file(email, headers, url, payload, proxy, reason, response_content=None):
     """Log error details as a curl command to log-error.txt."""
@@ -501,128 +529,104 @@ def process_get_points(account, max_retries=3, retry_delay=5):
         )
         return email, False, 0, message
 
-    if not token:
-        logging.info(f"No token for {email}. Attempting login...")
-        new_token = re_login(email, password, appid, proxy)
-        if not new_token:
+    # Create session
+    session = None
+    try:
+        if proxy and not check_proxy(proxy):
+            logging.error(f"Proxy {proxy} for {email} is not active.")
             message = (
                 "⚠️ *Get Points Failure Notification* ⚠️\n\n"
                 f"👤 *Account:* {email}\n\n"
-                "❌ *Status:* Login Failed\n\n"
-                f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                "⚙️ *Action Required:* Check credentials or CAPTCHA solver.\n\n"
+                "❌ *Status:* Proxy Not Active\n\n"
+                f"🛠️ *Proxy:* {proxy}\n\n"
+                "⚙️ *Action Required:* Please check proxy status.\n\n"
                 "🤖 *Bot made by https://t.me/AirdropInsiderID*"
             )
             return email, False, 0, message
-        token = new_token
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+        session = create_session(proxy)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
 
-    attempt = 0
-    while attempt < max_retries:
-        attempt += 1
-        session = None
-        try:
-            if proxy and not check_proxy(proxy):
-                logging.error(f"Attempt {attempt}/{max_retries}: Proxy {proxy} for {email} is not active.")
-                if attempt == max_retries:
-                    message = (
-                        "⚠️ *Get Points Failure Notification* ⚠️\n\n"
-                        f"👤 *Account:* {email}\n\n"
-                        "❌ *Status:* Proxy Not Active\n\n"
-                        f"🛠️ *Proxy:* {proxy}\n\n"
-                        f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                        "⚙️ *Action Required:* Please check proxy status.\n\n"
-                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                    )
-                    return email, False, 0, message
-                logging.info(f"Retrying after {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                continue
-
-            session = create_session(proxy)
-            logging.debug(f"Calling total_points for {email}")
-            success, points, status_message = total_points(headers, session, appid, email, password, proxy)
-
-            if success:
-                message = (
-                    "✅ *🌟 Get Points Success Notification 🌟* ✅\n\n"
-                    f"👤 *Account:* {email}\n\n"
-                    f"💰 *Points Earned:* {points}\n\n"
-                    f"📢 *Message:* {status_message}\n\n"
-                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                )
-                logging.success(f"Success get points for {email}: {points} points")
-                return email, True, points, message
-            else:
-                logging.error(f"Attempt {attempt}/{max_retries}: Failed get points for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
-                log_curl_to_file(email, headers, f"{get_points_url}?appid={appid}", None, proxy, status_message)
-                if "Session expired" in status_message:
-                    message = (
-                        "⚠️ *Get Points Failure Notification* ⚠️\n\n"
-                        f"👤 *Account:* {email}\n\n"
-                        "❌ *Status:* Session Expired\n\n"
-                        f"📢 *Reason:* {status_message}\n\n"
-                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                        "⚙️ *Action Required:* Re-login failed, check credentials or CAPTCHA solver.\n\n"
-                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                    )
-                    return email, False, 0, message
-                if attempt == max_retries:
-                    message = (
-                        "⚠️ *Get Points Failure Notification* ⚠️\n\n"
-                        f"👤 *Account:* {email}\n\n"
-                        "❌ *Status:* Get Points Failed\n\n"
-                        f"📢 *Reason:* {status_message}\n\n"
-                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                        f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                        "⚙️ *Action Required:* Check account or proxy status.\n\n"
-                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                    )
-                    return email, False, 0, message
-                logging.info(f"Retrying after {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                continue
-        except NameError as ne:
-            logging.error(f"NameError in process_get_points for {email}: {ne}")
-            message = (
-                "⚠️ *Get Points Failure Notification* ⚠️\n\n"
-                f"👤 *Account:* {email}\n\n"
-                "❌ *Status:* Script Error\n\n"
-                f"📢 *Reason:* NameError: {ne}\n\n"
-                f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                "⚙️ *Action Required:* Check script for variable errors.\n\n"
-                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-            )
-            return email, False, 0, message
-        except Exception as e:
-            error_message = str(e)
-            response_content = getattr(e.response, 'text', 'No response content') if hasattr(e, 'response') else "No response"
-            logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {error_message}, Response: {response_content}")
-            log_curl_to_file(email, headers, f"{get_points_url}?appid={appid}", None, proxy, error_message, response_content)
-            if attempt == max_retries:
+        # Validate token if it exists
+        if token and validate_token(token, appid, session, proxy):
+            logging.info(f"Using existing valid token for {email}")
+        else:
+            logging.info(f"No valid token for {email}. Attempting login...")
+            new_token = re_login(email, password, appid, proxy)
+            if not new_token:
                 message = (
                     "⚠️ *Get Points Failure Notification* ⚠️\n\n"
                     f"👤 *Account:* {email}\n\n"
-                    "❌ *Status:* Error\n\n"
-                    f"📢 *Reason:* {error_message}\n\n"
+                    "❌ *Status:* Login Failed\n\n"
                     f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                    f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                    "⚙️ *Action Required:* Check logs for details.\n\n"
+                    "⚙️ *Action Required:* Check credentials or CAPTCHA solver.\n\n"
                     "🤖 *Bot made by https://t.me/AirdropInsiderID*"
                 )
                 return email, False, 0, message
-            logging.info(f"Retrying after {retry_delay} seconds...")
-            time.sleep(retry_delay)
-            continue
-        finally:
-            if session:
-                session.close()
+            token = new_token
+            headers["Authorization"] = f"Bearer {token}"
 
+        # Process get points with retries
+        attempt = 0
+        while attempt < max_retries:
+            attempt += 1
+            try:
+                logging.debug(f"Calling total_points for {email}, attempt {attempt}/{max_retries}")
+                success, points, status_message = total_points(headers, session, appid, email, password, proxy)
+                if success:
+                    message = (
+                        "✅ *🌟 Get Points Success Notification 🌟* ✅\n\n"
+                        f"👤 *Account:* {email}\n\n"
+                        f"💰 *Points Earned:* {points}\n\n"
+                        f"📢 *Message:* {status_message}\n\n"
+                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                    )
+                    logging.success(f"Success get points for {email}: {points} points")
+                    return email, True, points, message
+                else:
+                    logging.error(f"Attempt {attempt}/{max_retries}: Failed get points for {email}. Reason: {status_message}")
+                    log_curl_to_file(email, headers, f"{get_points_url}?appid={appid}", None, proxy, status_message)
+                    if attempt == max_retries:
+                        message = (
+                            "⚠️ *Get Points Failure Notification* ⚠️\n\n"
+                            f"👤 *Account:* {email}\n\n"
+                            "❌ *Status:* Get Points Failed\n\n"
+                            f"📢 *Reason:* {status_message}\n\n"
+                            f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                            f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
+                            "⚙️ *Action Required:* Check account or proxy status.\n\n"
+                            "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                        )
+                        return email, False, 0, message
+                    logging.info(f"Retrying after {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+            except Exception as e:
+                error_message = str(e)
+                response_content = getattr(e.response, 'text', 'No response content') if hasattr(e, 'response') else "No response"
+                logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {error_message}, Response: {response_content}")
+                log_curl_to_file(email, headers, f"{get_points_url}?appid={appid}", None, proxy, error_message, response_content)
+                if attempt == max_retries:
+                    message = (
+                        "⚠️ *Get Points Failure Notification* ⚠️\n\n"
+                        f"👤 *Account:* {email}\n\n"
+                        "❌ *Status:* Error\n\n"
+                        f"📢 *Reason:* {error_message}\n\n"
+                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                        f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
+                        "⚙️ *Action Required:* Check logs for details.\n\n"
+                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                    )
+                    return email, False, 0, message
+                logging.info(f"Retrying after {retry_delay} seconds...")
+                time.sleep(retry_delay)
+    finally:
+        if session:
+            session.close()
+            
 async def get_points_periodically():
     """Run get points every 1 hour for eligible accounts in batches of 10."""
     accounts = read_account()
