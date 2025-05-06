@@ -67,27 +67,42 @@ def read_config(config_file):
 def update_config_with_token(login_response, config_data, email, config_file):
     logging.info(f"Before update, config_data: {json.dumps(config_data, indent=2)}")
     lock = FileLock(f"{config_file}.lock")
+
     with lock:
         if not login_response or not login_response.get("status"):
             logging.error(f"No valid login data to update config for {email}.")
             return config_data
 
-        token = login_response["data"]["token"]
+        token = login_response["data"].get("token")
+        if not token:
+            logging.error(f"Token missing in login response for {email}.")
+            return config_data
+
         if "accounts" not in config_data:
             config_data["accounts"] = []
 
+        updated = False
         for account in config_data["accounts"]:
-            if account["email"] == email:
+            if account.get("email") == email:
                 account["token"] = token
+                # Bersihkan flag IsFailedLogin jika sebelumnya ada
+                if "isFailedLogin" in account:
+                    del account["isFailedLogin"]
+                updated = True
                 break
 
-        try:
-            with open(config_file, "w") as f:
-                json.dump(config_data, f, indent=2)
-            logging.info(f"Token for {email} updated in {config_file}")
-        except Exception as e:
-            logging.error(f"Failed to update config for {email}: {e}")
-        return config_data
+        if updated:
+            try:
+                with open(config_file, "w") as f:
+                    json.dump(config_data, f, indent=2)
+                logging.info(f"Token for {email} updated in {config_file}")
+            except Exception as e:
+                logging.error(f"Failed to update config for {email}: {e}")
+        else:
+            logging.warning(f"Token not updated for {email}, either account not found or token empty.")
+
+    return config_data
+
 
 def update_config_with_success(email, config_data, config_file):
     lock = FileLock(f"{config_file}.lock")
@@ -95,18 +110,23 @@ def update_config_with_success(email, config_data, config_file):
         if "accounts" not in config_data:
             config_data["accounts"] = []
 
+        updated = False
         for account in config_data["accounts"]:
             if account["email"] == email:
                 account["last_success"] = datetime.now().isoformat()
+                updated = True
                 break
 
-        try:
-            with open(config_file, "w") as f:
-                json.dump(config_data, f, indent=2)
-            logging.info(f"Last success timestamp updated for {email}")
-        except Exception as e:
-            logging.error(f"Failed to update config for {email}: {e}")
-        return config_data
+        if updated:
+            try:
+                with open(config_file, "w") as f:
+                    json.dump(config_data, f, indent=2)
+                logging.info(f"Last success timestamp updated for {email}")
+            except Exception as e:
+                logging.error(f"Failed to update config for {email}: {e}")
+        else:
+            logging.warning(f"Last success not updated for {email}, account not found.")
+
 
 def log_total_points(total_points, successful_accounts, total_accounts, total_point_log):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -291,6 +311,8 @@ def perform_login(session, puzzle_id, captcha_solution, email, password, appid):
 
 def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1):
     session = create_session(proxy)
+    captcha_file = None  # Declare di luar loop supaya bisa diakses di finally
+
     try:
         for attempt in range(max_retries):
             puzzle_id = get_puzzle_id(session, appid)
@@ -315,11 +337,24 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1
             if login_response and isinstance(login_response, dict) and login_response.get("status"):
                 logging.info(f"Re-login successful for {email}")
                 config_data = read_config(config_file)
-                update_config_with_token(login_response, config_data, email, config_file)
+                for account in config_data.get("accounts", []):
+                    if account.get("email") == email:
+                        account["token"] = login_response["data"].get("token", "")
+                        if "IsFailedLogin" in account:
+                            del account["IsFailedLogin"]
+                        break
+                try:
+                    with FileLock(f"{config_file}.lock"):
+                        with open(config_file, "w") as f:
+                            json.dump(config_data, f, indent=2)
+                    logging.info(f"Token updated and IsFailedLogin cleared for {email}")
+                except Exception as e:
+                    logging.error(f"Failed to update config for {email}: {e}")
                 return login_response["data"]["token"]
+
             elif login_response and isinstance(login_response, dict) and login_response.get("message") == "Incorrect answer. Try again!":
                 logging.info(f"Incorrect captcha for {email}. Retry {attempt + 1}/{max_retries}")
-                log_to_file(os.path.join(os.path.dirname(config_file), "captcha_errors.txt"), 
+                log_to_file(os.path.join(os.path.dirname(config_file), "captcha_errors.txt"),
                             f"ERROR: Incorrect answer - Email: {email} | Captcha: {captcha_solution} | Proxy: {proxy if proxy else 'No Proxy'} | Retry: {attempt + 1}/{max_retries}")
                 time.sleep(5)
                 continue
@@ -327,10 +362,34 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1
                 logging.error(f"Re-login failed for {email}: {login_response}")
                 time.sleep(5)
                 continue
+
+        # Jika sampai sini artinya semua retry gagal
         logging.error(f"Re-login failed for {email} after {max_retries} attempts")
+        config_data = read_config(config_file)
+        for account in config_data.get("accounts", []):
+            if account.get("email") == email:
+                account["IsFailedLogin"] = True
+                break
+        try:
+            with FileLock(f"{config_file}.lock"):
+                with open(config_file, "w") as f:
+                    json.dump(config_data, f, indent=2)
+            logging.info(f"Marked {email} as failed login in config file")
+        except Exception as e:
+            logging.error(f"Failed to update IsFailedLogin flag for {email}: {e}")
+
         return None
+
     finally:
-        session.close()
+        if session:
+            session.close()
+        if captcha_file and os.path.exists(captcha_file):
+            try:
+                os.remove(captcha_file)
+                logging.info(f"Captcha file '{captcha_file}' deleted.")
+            except Exception as e:
+                logging.warning(f"Failed to delete captcha file '{captcha_file}': {e}")
+
 
 def log_to_file(filename, message):
     with open(filename, "a") as f:
