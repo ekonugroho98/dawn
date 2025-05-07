@@ -1,4 +1,4 @@
-# main_2.py
+# main_4.py
 import asyncio
 import sys
 import os
@@ -8,7 +8,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core_keep_alive import run_keep_alive
 
 if __name__ == "__main__":
-    config_file = "../config_2.json"
+    config_file = "/app/config_4.json"
     log_error_file = "log-error.txt"
     
     try:

@@ -1,18 +1,21 @@
-# main_2.py
+# account_4.py
 import asyncio
 import sys
 import os
 
 # Tambahkan direktori parent ke sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from core_keep_alive import run_keep_alive
+from core_get_point import run_get_points
 
 if __name__ == "__main__":
-    config_file = "../config_2.json"
+    config_file = "/app/config_4.json"
+    point_log_dir = "point"
     log_error_file = "log-error.txt"
+    total_point_log = "total_point.txt"
+    not_referral_log = "not_referral.txt"
     
     try:
-        asyncio.run(run_keep_alive(config_file, log_error_file))
+        asyncio.run(run_get_points(config_file, point_log_dir, log_error_file, total_point_log, not_referral_log))
     except KeyboardInterrupt:
         print("Script stopped by user.")
     except Exception as e:

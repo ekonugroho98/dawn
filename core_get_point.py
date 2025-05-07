@@ -313,7 +313,7 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1
         config_data = read_config(config_file)
         update_config_with_token(None, config_data, email, config_file, is_failed_login=None)
         logging.info(f"Token cleared for {email} before re-login attempt.")
-        
+
         for attempt in range(max_retries):
             puzzle_id = get_puzzle_id(session, appid)
             if not puzzle_id:
@@ -395,7 +395,7 @@ def total_points(headers, session, appid, email, password, proxy, config_file, p
                 )
                 #  4j1r2lic, ero8ii2k, p3g4fq15
 
-                if referral_point_data.get("referredBy", 0) not in ["4j1r2lic", "ero8ii2k", "p3g4fq15"]:
+                if referral_point_data.get("referredBy", 0) not in ["4j1r2lic", "ero8ii2k", "p3g4fq15", "c5fovgjs"]:
                 # Kode yang akan dijalankan jika referredBy bukan 4j1r2lic, ero8ii2k, atau p3g4fq15
                     log_not_referred(email, referral_point_data.get("referredBy", 0), "")
                     pass

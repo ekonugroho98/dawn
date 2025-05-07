@@ -7,8 +7,8 @@ import shutil
 def create_account_structure(config_file):
     # Extract account number from config file (e.g., config_2.json -> account_2)
     base_name = os.path.basename(config_file)
-    if base_name == "config.json":
-        account_name = "account_1"
+    if base_name == "config_4.json":
+        account_name = "account_4"
     else:
         account_number = base_name.replace("config_", "").replace(".json", "")
         account_name = f"account_{account_number}"
@@ -46,7 +46,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core_get_point import run_get_points
 
 if __name__ == "__main__":
-    config_file = "../{base_name}"
+    config_file = "/app/{base_name}"
     point_log_dir = "point"
     log_error_file = "log-error.txt"
     total_point_log = "total_point.txt"

@@ -41,3 +41,31 @@ services:
     volumes:
       - .:/app
     command: ["python", "account_3/main_3.py"]
+
+  account_4:
+    build: .
+    container_name: account_4
+    volumes:
+      - .:/app
+    command: ["python", "account_4/account_4.py"]
+
+  main_4:
+    build: .
+    container_name: main_4
+    volumes:
+      - .:/app
+    command: ["python", "account_4/main_4.py"]
+
+  account_5:
+    build: .
+    container_name: account_5
+    volumes:
+      - .:/app
+    command: ["python", "account_5/account_5.py"]
+
+  main_5:
+    build: .
+    container_name: main_5
+    volumes:
+      - .:/app
+    command: ["python", "account_5/main_5.py"]

@@ -10,14 +10,14 @@ def generate_appid():
 
 # Config awal untuk proxy
 proxy_base = "http://bda3498ff170f27a3618:1142078ecc2a3ab9@gw.dataimpulse.com"
-start_port = 10000  # Port awal, bisa diubah sesuai config
+start_port = 10361  # Port awal, bisa diubah sesuai config
 
 # List untuk menyimpan data JSON
 json_data = []
 
-# Membaca data dari file account36.txt
+# Membaca data dari file account_info_eko.txt
 try:
-    with open('account_info-36.txt', 'r') as file:
+    with open('account_info_nugroho.txt', 'r') as file:
         accounts = file.readlines()
     
     # Proses setiap akun
@@ -26,16 +26,25 @@ try:
         if not account.strip():
             continue
             
-        # Split hanya pada | pertama untuk menangani | dalam password
+        # Bersihkan baris dari spasi atau karakter tak terduga
+        account = account.strip()
+            
+        # Split pada | pertama untuk mendapatkan email dan sisanya
         try:
-            parts = account.strip().split('|', 1)  # Split hanya pada | pertama
+            parts = account.split('|', 1)
             if len(parts) != 2:
-                print(f"Baris tidak valid diabaikan: {account.strip()}")
+                print(f"Baris tidak valid diabaikan: {account} (kurang dari 2 bagian)")
                 continue
                 
             email = parts[0]
-            # Ambil password (hapus | di akhir jika ada)
-            password = parts[1].rstrip('|')
+            # Sisanya (password|token) dipisah lagi dari belakang
+            remaining = parts[1].rsplit('|', 1)
+            if len(remaining) != 2:
+                print(f"Baris tidak valid diabaikan: {account} (bagian password/token tidak valid)")
+                continue
+                
+            password = remaining[0]
+            token = remaining[1]
             
             # Generate data untuk setiap akun
             account_data = {
@@ -43,11 +52,11 @@ try:
                 "appid": generate_appid(),
                 "email": email,
                 "password": password,
-                "token": "",
+                "token": token,
             }
             json_data.append(account_data)
         except Exception as e:
-            print(f"Baris tidak valid diabaikan: {account.strip()} - Error: {str(e)}")
+            print(f"Baris tidak valid diabaikan: {account} - Error: {str(e)}")
             continue
 
     # Simpan ke file JSON
@@ -57,6 +66,6 @@ try:
     print("File JSON telah digenerate: accounts.json")
 
 except FileNotFoundError:
-    print("Error: File account36.txt tidak ditemukan!")
+    print("Error: File account_info_eko.txt tidak ditemukan!")
 except Exception as e:
     print(f"Error: Terjadi kesalahan - {str(e)}")
