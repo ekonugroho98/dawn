@@ -18,6 +18,14 @@ import os
 from itertools import islice
 from filelock import FileLock
 
+# Nonaktifkan Warning SSL dari urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Nonaktifkan log warning dari urllib3 jika masih muncul
+logging.getLogger("urllib3").setLevel(logging.CRITICAL)
+logging.getLogger("urllib3").propagate = False
+
+
 # Initialize UserAgent for random User-Agent generation
 ua = UserAgent()
 
@@ -64,30 +72,24 @@ def read_config(config_file):
         logging.error(f"Invalid JSON format in '{config_file}'.")
         return {}
 
-def update_config_with_token(login_response, config_data, email, config_file):
-    logging.info(f"Before update, config_data: {json.dumps(config_data, indent=2)}")
+def update_config_with_token(login_response, config_data, email, config_file, is_failed_login=None):
     lock = FileLock(f"{config_file}.lock")
 
     with lock:
-        if not login_response or not login_response.get("status"):
-            logging.error(f"No valid login data to update config for {email}.")
-            return config_data
-
-        token = login_response["data"].get("token")
-        if not token:
-            logging.error(f"Token missing in login response for {email}.")
-            return config_data
-
         if "accounts" not in config_data:
             config_data["accounts"] = []
 
         updated = False
         for account in config_data["accounts"]:
             if account.get("email") == email:
-                account["token"] = token
-                # Bersihkan flag IsFailedLogin jika sebelumnya ada
-                if "isFailedLogin" in account:
-                    del account["isFailedLogin"]
+                if login_response and login_response.get("status"):
+                    token = login_response["data"].get("token")
+                    if token:
+                        account["token"] = token
+                else:
+                    account["token"] = ""  # Kosongkan token jika login gagal
+                    if is_failed_login is not None:
+                        account["is_login_failed"] = is_failed_login
                 updated = True
                 break
 
@@ -95,13 +97,14 @@ def update_config_with_token(login_response, config_data, email, config_file):
             try:
                 with open(config_file, "w") as f:
                     json.dump(config_data, f, indent=2)
-                logging.info(f"Token for {email} updated in {config_file}")
+                logging.info(f"Config updated for {email}. Token and is_login_failed set.")
             except Exception as e:
                 logging.error(f"Failed to update config for {email}: {e}")
         else:
-            logging.warning(f"Token not updated for {email}, either account not found or token empty.")
+            logging.warning(f"Config not updated for {email}, either account not found.")
 
     return config_data
+
 
 
 def update_config_with_success(email, config_data, config_file):
@@ -141,16 +144,7 @@ def log_total_points(total_points, successful_accounts, total_accounts, total_po
             logging.error(f"Failed to log total points to {total_point_log}: {e}")
 
 def log_not_referred(email, referred_by, not_referral_log):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_entry = f"{timestamp} - Email: {email} - referredBy: {referred_by}\n"
-    lock = FileLock(f"{not_referral_log}.lock")
-    with lock:
-        try:
-            with open(not_referral_log, "a") as f:
-                f.write(log_entry)
-            logging.info(f"Logged non-referred email {email} with referredBy {referred_by} to {not_referral_log}")
-        except Exception as e:
-            logging.error(f"Failed to log to {not_referral_log} for {email}: {e}")
+            logging.error(f"Failed to log not referred to {not_referral_log} for {email}, referredBy: {referred_by}")
 
 def parse_proxy(proxy):
     proxy_url = urlparse(proxy)
@@ -178,6 +172,7 @@ def check_proxy(proxy):
 
 def create_session(proxy=None):
     session = requests.Session()
+    session.verify = False 
     if proxy:
         proxies = parse_proxy(proxy)
         logging.info(f"Configuring session with proxy: {proxy}")
@@ -311,9 +306,14 @@ def perform_login(session, puzzle_id, captcha_solution, email, password, appid):
 
 def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1):
     session = create_session(proxy)
-    captcha_file = None  # Declare di luar loop supaya bisa diakses di finally
+    captcha_file = None
 
     try:
+          # Kosongkan token terlebih dahulu sebelum re-login
+        config_data = read_config(config_file)
+        update_config_with_token(None, config_data, email, config_file, is_failed_login=None)
+        logging.info(f"Token cleared for {email} before re-login attempt.")
+        
         for attempt in range(max_retries):
             puzzle_id = get_puzzle_id(session, appid)
             if not puzzle_id:
@@ -334,50 +334,23 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1
                 continue
 
             login_response = perform_login(session, puzzle_id, captcha_solution, email, password, appid)
-            if login_response and isinstance(login_response, dict) and login_response.get("status"):
+            if login_response and login_response.get("status"):
                 logging.info(f"Re-login successful for {email}")
+
+                # Selalu gunakan update_config_with_token untuk menyimpan token
                 config_data = read_config(config_file)
-                for account in config_data.get("accounts", []):
-                    if account.get("email") == email:
-                        account["token"] = login_response["data"].get("token", "")
-                        if "IsFailedLogin" in account:
-                            del account["IsFailedLogin"]
-                        break
-                try:
-                    with FileLock(f"{config_file}.lock"):
-                        with open(config_file, "w") as f:
-                            json.dump(config_data, f, indent=2)
-                    logging.info(f"Token updated and IsFailedLogin cleared for {email}")
-                except Exception as e:
-                    logging.error(f"Failed to update config for {email}: {e}")
-                return login_response["data"]["token"]
+                update_config_with_token(login_response, config_data, email, config_file, is_failed_login=False)
+                
+                logging.info(f"Token updated using update_config_with_token for {email}")
+                return login_response["data"].get("token", "")
 
-            elif login_response and isinstance(login_response, dict) and login_response.get("message") == "Incorrect answer. Try again!":
-                logging.info(f"Incorrect captcha for {email}. Retry {attempt + 1}/{max_retries}")
-                log_to_file(os.path.join(os.path.dirname(config_file), "captcha_errors.txt"),
-                            f"ERROR: Incorrect answer - Email: {email} | Captcha: {captcha_solution} | Proxy: {proxy if proxy else 'No Proxy'} | Retry: {attempt + 1}/{max_retries}")
-                time.sleep(5)
-                continue
-            else:
-                logging.error(f"Re-login failed for {email}: {login_response}")
-                time.sleep(5)
-                continue
+            logging.error(f"Re-login failed for {email}: {login_response}")
+            time.sleep(5)
 
-        # Jika sampai sini artinya semua retry gagal
+        # Jika semua retry gagal
         logging.error(f"Re-login failed for {email} after {max_retries} attempts")
         config_data = read_config(config_file)
-        for account in config_data.get("accounts", []):
-            if account.get("email") == email:
-                account["IsFailedLogin"] = True
-                break
-        try:
-            with FileLock(f"{config_file}.lock"):
-                with open(config_file, "w") as f:
-                    json.dump(config_data, f, indent=2)
-            logging.info(f"Marked {email} as failed login in config file")
-        except Exception as e:
-            logging.error(f"Failed to update IsFailedLogin flag for {email}: {e}")
-
+        update_config_with_token(None, config_data, email, config_file, is_failed_login=True)
         return None
 
     finally:
@@ -389,6 +362,7 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1
                 logging.info(f"Captcha file '{captcha_file}' deleted.")
             except Exception as e:
                 logging.warning(f"Failed to delete captcha file '{captcha_file}': {e}")
+
 
 
 def log_to_file(filename, message):
@@ -425,7 +399,7 @@ def total_points(headers, session, appid, email, password, proxy, config_file, p
                 # Kode yang akan dijalankan jika referredBy bukan 4j1r2lic, ero8ii2k, atau p3g4fq15
                     log_not_referred(email, referral_point_data.get("referredBy", 0), "")
                     pass
-                log_points(email, points, "Points retrieved successfully", point_log_dir)
+                # log_points(email, points, "Points retrieved successfully", point_log_dir)
                 # config_data = read_config(config_file)
                 # update_config_with_success(email, config_data, config_file)
                 return True, points, "Points retrieved successfully"
@@ -515,15 +489,7 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
     try:
         if proxy and not check_proxy(proxy):
             logging.error(f"Proxy {proxy} for {email} is not active.")
-            message = (
-                "⚠️ *Get Points Failure Notification* ⚠️\n\n"
-                f"👤 *Account:* {email}\n\n"
-                "❌ *Status:* Proxy Not Active\n\n"
-                f"🛠️ *Proxy:* {proxy}\n\n"
-                "⚙️ *Action Required:* Please check proxy status.\n\n"
-                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-            )
-            return email, False, 0, message
+            return email, False, 0, "Proxy not active"
 
         session = create_session(proxy)
         headers = {
@@ -531,21 +497,14 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             "Content-Type": "application/json"
         }
 
-        if token != "":
-            logging.info(f"Using existing valid token for {email}")
-        else:
+        if not token:
             logging.info(f"No valid token for {email}. Attempting login...")
             new_token = re_login(email, password, appid, proxy, config_file)
             if not new_token:
-                message = (
-                    "⚠️ *Get Points Failure Notification* ⚠️\n\n"
-                    f"👤 *Account:* {email}\n\n"
-                    "❌ *Status:* Login Failed\n\n"
-                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                    "⚙️ *Action Required:* Check credentials or CAPTCHA solver.\n\n"
-                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                )
-                return email, False, 0, message
+                logging.error(f"Login failed for {email}, setting is_login_failed: true")
+                update_config_with_token(None, read_config(config_file), email, config_file, is_failed_login=True)
+                return email, False, 0, "Login failed, is_login_failed set to true"
+
             token = new_token
             headers["Authorization"] = f"Bearer {token}"
 
@@ -556,57 +515,24 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                 logging.debug(f"Calling total_points for {email}, attempt {attempt}/{max_retries}")
                 success, points, status_message = total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir)
                 if success:
-                    message = (
-                        "✅ *🌟 Get Points Success Notification 🌟* ✅\n\n"
-                        f"👤 *Account:* {email}\n\n"
-                        f"💰 *Points Earned:* {points}\n\n"
-                        f"📢 *Message:* {status_message}\n\n"
-                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                    )
                     logging.success(f"Success get points for {email}: {points} points")
-                    return email, True, points, message
-                else:
-                    logging.error(f"Attempt {attempt}/{max_retries}: Failed get points for {email}. Reason: {status_message}")
-                    log_curl_to_file(email, headers, f"https://ext-api.dawninternet.com/api/atom/v1/userreferral/getpoint?appid={appid}", None, proxy, status_message, log_error_file)
-                    if attempt == max_retries:
-                        message = (
-                            "⚠️ *Get Points Failure Notification* ⚠️\n\n"
-                            f"👤 *Account:* {email}\n\n"
-                            "❌ *Status:* Get Points Failed\n\n"
-                            f"📢 *Reason:* {status_message}\n\n"
-                            f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                            f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                            "⚙️ *Action Required:* Check account or proxy status.\n\n"
-                            "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                        )
-                        return email, False, 0, message
-                    logging.info(f"Retrying after {retry_delay} seconds...")
-                    time.sleep(retry_delay)
+                    # Hapus is_login_failed jika ada
+                    update_config_with_token({"status": True, "data": {"token": token}}, read_config(config_file), email, config_file, is_failed_login=False)
+                    return email, True, points, f"Success: {points} points"
+
             except Exception as e:
-                error_message = str(e)
-                response_content = getattr(e.response, 'text', 'No response content') if hasattr(e, 'response') else "No response"
-                logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {error_message}, Response: {response_content}")
-                log_curl_to_file(email, headers, f"https://ext-api.dawninternet.com/api/atom/v1/userreferral/getpoint?appid={appid}", None, proxy, error_message, log_error_file, response_content)
+                logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {e}")
                 if attempt == max_retries:
-                    message = (
-                        "⚠️ *Get Points Failure Notification* ⚠️\n\n"
-                        f"👤 *Account:* {email}\n\n"
-                        "❌ *Status:* Error\n\n"
-                        f"📢 *Reason:* {error_message}\n\n"
-                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                        f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                        "⚙️ *Action Required:* Check logs for details.\n\n"
-                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                    )
-                    return email, False, 0, message
-                logging.info(f"Retrying after {retry_delay} seconds...")
+                    logging.error(f"Failed to get points for {email} after {max_retries} attempts.")
+                    update_config_with_token(None, read_config(config_file), email, config_file, is_failed_login=True)
+                    return email, False, 0, "Failed to get points, is_login_failed set to true"
                 time.sleep(retry_delay)
+                continue
     finally:
         if session:
             session.close()
 
-async def run_get_points(config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, get_points_interval=3600, batch_size=10):
+async def run_get_points(config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, get_points_interval=86400, batch_size=1):
     config = read_config(config_file)
     bot_token = config.get("telegram_bot_token")
     chat_id = config.get("telegram_chat_id")
@@ -619,7 +545,6 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
         return
 
     bot = telegram.Bot(token=bot_token) if use_telegram else None
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     message_queue = Queue()
 
@@ -669,7 +594,7 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
                         pool.join()
                         logging.debug("Pool closed for batch")
 
-            log_total_points(total_cycle_points, successful_accounts, len(accounts), total_point_log)
+            # log_total_points(total_cycle_points, successful_accounts, len(accounts), total_point_log)
             logging.info(f"Get points cycle completed. Waiting {get_points_interval} seconds for next cycle.")
         except Exception as e:
             logging.error(f"Error in get points cycle: {e}")

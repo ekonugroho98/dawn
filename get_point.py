@@ -668,7 +668,7 @@ async def get_points_periodically():
                         logging.debug("Pool closed for batch")
 
             # Log total points for the cycle
-            log_total_points(total_cycle_points, successful_accounts, len(accounts))
+            # log_total_points(total_cycle_points, successful_accounts, len(accounts))
             logging.info(f"Get points cycle completed. Waiting {get_points_interval} seconds (1 hour) for next cycle.")
         except Exception as e:
             logging.error(f"Error in get points cycle: {e}")

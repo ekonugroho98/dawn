@@ -8,7 +8,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core_keep_alive import run_keep_alive
 
 if __name__ == "__main__":
-    config_file = "../config_3.json"
+       # config_file = "../config_3.json"
+    config_file = "/app/config_3.json"
     log_error_file = "log-error.txt"
     
     try:

@@ -1,0 +1,43 @@
+version: "3.8"
+services:
+  account_1:
+    build: .
+    container_name: account_1
+    volumes:
+      - .:/app
+    command: ["python", "account_1/account_1.py"]
+  
+  main_1:
+    build: .
+    container_name: main_1
+    volumes:
+      - .:/app
+    command: ["python", "account_1/main_1.py"]
+
+  account_2:
+    build: .
+    container_name: account_2
+    volumes:
+      - .:/app
+    command: ["python", "account_2/account_2.py"]
+
+  main_2:
+    build: .
+    container_name: main_2
+    volumes:
+      - .:/app
+    command: ["python", "account_2/main_2.py"]
+
+  account_3:
+    build: .
+    container_name: account_3
+    volumes:
+      - .:/app
+    command: ["python", "account_3/account_3.py"]
+
+  main_3:
+    build: .
+    container_name: main_3
+    volumes:
+      - .:/app
+    command: ["python", "account_3/main_3.py"]
