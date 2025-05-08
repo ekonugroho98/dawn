@@ -10,7 +10,7 @@ def generate_appid():
 
 # Config awal untuk proxy
 proxy_base = "http://bda3498ff170f27a3618:1142078ecc2a3ab9@gw.dataimpulse.com"
-start_port = 10361  # Port awal, bisa diubah sesuai config
+start_port = 10461  # Port awal, bisa diubah sesuai config
 
 # List untuk menyimpan data JSON
 json_data = []

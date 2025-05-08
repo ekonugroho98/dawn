@@ -487,9 +487,9 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
 
     session = None
     try:
-        if proxy and not check_proxy(proxy):
-            logging.error(f"Proxy {proxy} for {email} is not active.")
-            return email, False, 0, "Proxy not active"
+        # if proxy and not check_proxy(proxy):
+        #     logging.error(f"Proxy {proxy} for {email} is not active.")
+        #     return email, False, 0, "Proxy not active"
 
         session = create_session(proxy)
         headers = {
