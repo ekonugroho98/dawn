@@ -51,13 +51,14 @@ def parse_proxy(proxy):
 
 # Fungsi untuk memeriksa proxy
 def check_proxy(proxy):
-    proxies = parse_proxy(proxy)
-    test_url = "http://httpbin.org/ip"
-    try:
-        response = requests.get(test_url, proxies=proxies, timeout=5)
-        return response.status_code == 200
-    except requests.RequestException:
-        return False
+    return True
+    # proxies = parse_proxy(proxy)
+    # test_url = "http://httpbin.org/ip"
+    # try:
+    #     response = requests.get(test_url, proxies=proxies, timeout=5)
+    #     return response.status_code == 200
+    # except requests.RequestException:
+    #     return False
 
 # Membaca daftar proxy dari file
 def read_proxies(filename=PROXY_FILE):

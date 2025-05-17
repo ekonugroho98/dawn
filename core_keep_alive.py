@@ -193,7 +193,7 @@ async def telegram_message(bot, chat_id, message):
         except Exception as e:
             logging.error(f"Error sending Telegram message: {e}")
 
-def process_account(account, config_file, log_error_file, use_proxy, bot=None, chat_id=None, max_retries=3, retry_delay=5):
+def process_account(account, config_file, log_error_file, use_proxy, bot=None, chat_id=None, max_retries=1, retry_delay=5):
     email = account["email"]
     token = account["token"]
     appid = account["appid"]
@@ -282,7 +282,7 @@ def process_account(account, config_file, log_error_file, use_proxy, bot=None, c
             if session:
                 session.close()
 
-async def run_keep_alive(config_file, log_error_file, poll_interval=120):
+async def run_keep_alive(config_file, log_error_file, poll_interval=300):
     config = read_config(config_file)
     bot_token = config.get("telegram_bot_token")
     chat_id = config.get("telegram_chat_id")
