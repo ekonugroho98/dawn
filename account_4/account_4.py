@@ -8,8 +8,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core_get_point import run_get_points
 
 if __name__ == "__main__":
-    config_file = "../config_4.json"
-    # config_file = "/app/config_4.json"
+    # config_file = "../config_4.json"
+    config_file = "/app/config_4.json"
     point_log_dir = "point"
     log_error_file = "log-error.txt"
     total_point_log = "total_point.txt"

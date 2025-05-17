@@ -74,34 +74,57 @@ def read_config(config_file):
 
 def update_config_with_token(login_response, config_data, email, config_file, is_failed_login=None):
     lock = FileLock(f"{config_file}.lock")
+    logging.info(f"Attempting to update token for {email}")
 
-    with lock:
-        if "accounts" not in config_data:
-            config_data["accounts"] = []
-
-        updated = False
-        for account in config_data["accounts"]:
-            if account.get("email") == email:
-                if login_response and login_response.get("status"):
-                    token = login_response["data"].get("token")
-                    if token:
-                        account["token"] = token
-                else:
-                    account["token"] = ""  # Kosongkan token jika login gagal
-                    if is_failed_login is not None:
-                        account["is_login_failed"] = is_failed_login
-                updated = True
-                break
-
-        if updated:
+    try:
+        with lock:
+            logging.info(f"Acquired lock for {email}")
+            # Always read the latest config data
             try:
-                with open(config_file, "w") as f:
-                    json.dump(config_data, f, indent=2)
-                logging.info(f"Config updated for {email}. Token and is_login_failed set.")
+                with open(config_file, 'r') as f:
+                    config_data = json.load(f)
+                logging.info(f"Successfully read config file for {email}")
             except Exception as e:
-                logging.error(f"Failed to update config for {email}: {e}")
-        else:
-            logging.warning(f"Config not updated for {email}, either account not found.")
+                logging.error(f"Failed to read config file for {email}: {e}")
+                return config_data
+
+            if "accounts" not in config_data:
+                config_data["accounts"] = []
+                logging.info(f"Created accounts list for {email}")
+
+            updated = False
+            for account in config_data["accounts"]:
+                if account.get("email") == email:
+                    if login_response and login_response.get("status"):
+                        token = login_response["data"].get("token")
+                        if token:
+                            old_token = account.get("token", "")
+                            account["token"] = token
+                            # Set is_login_failed to false when token is successfully updated
+                            account["is_login_failed"] = False
+                            logging.info(f"Token updated for {email}. Old token: {old_token[:20]}... New token: {token[:20]}...")
+                    else:
+                        account["token"] = ""  # Kosongkan token jika login gagal
+                        if is_failed_login is not None:
+                            account["is_login_failed"] = is_failed_login
+                        logging.info(f"Token cleared for {email} due to failed login")
+                    updated = True
+                    break
+
+            if updated:
+                try:
+                    with open(config_file, "w") as f:
+                        json.dump(config_data, f, indent=2)
+                    logging.info(f"Config file successfully updated for {email}")
+                except Exception as e:
+                    logging.error(f"Failed to write config file for {email}: {e}")
+            else:
+                logging.warning(f"Account {email} not found in config file")
+
+    except Exception as e:
+        logging.error(f"Error in update_config_with_token for {email}: {e}")
+    finally:
+        logging.info(f"Released lock for {email}")
 
     return config_data
 
@@ -309,12 +332,14 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1
     captcha_file = None
 
     try:
-          # Kosongkan token terlebih dahulu sebelum re-login
+        # Kosongkan token terlebih dahulu sebelum re-login
         config_data = read_config(config_file)
         update_config_with_token(None, config_data, email, config_file, is_failed_login=None)
         logging.info(f"Token cleared for {email} before re-login attempt.")
 
         for attempt in range(max_retries):
+            logging.info(f"Login attempt {attempt + 1}/{max_retries} for {email}")
+            
             puzzle_id = get_puzzle_id(session, appid)
             if not puzzle_id:
                 logging.error(f"Failed to get puzzle_id for {email}")
@@ -341,8 +366,19 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1
                 config_data = read_config(config_file)
                 update_config_with_token(login_response, config_data, email, config_file, is_failed_login=False)
                 
-                logging.info(f"Token updated using update_config_with_token for {email}")
-                return login_response["data"].get("token", "")
+                # Verifikasi token telah diupdate
+                config_data = read_config(config_file)
+                for account in config_data.get("accounts", []):
+                    if account.get("email") == email:
+                        new_token = account.get("token", "")
+                        if new_token:
+                            logging.info(f"Token successfully updated in config for {email}")
+                            return new_token
+                        else:
+                            logging.error(f"Token not found in config after update for {email}")
+                
+                logging.error(f"Account not found in config after update for {email}")
+                return None
 
             logging.error(f"Re-login failed for {email}: {login_response}")
             time.sleep(5)
