@@ -306,7 +306,7 @@ def process_account(account, config_file, log_error_file, use_proxy, bot=None, c
             if session:
                 session.close()
 
-async def run_keep_alive(config_file, log_error_file, poll_interval=300):
+async def run_keep_alive(config_file, log_error_file, poll_interval=60):
     config = read_config(config_file)
     bot_token = config.get("telegram_bot_token")
     chat_id = config.get("telegram_chat_id")
