@@ -208,7 +208,7 @@ def process_account(account, config_file, log_error_file, use_proxy, bot=None, c
     base_keepalive_url = "https://ext-api.dawninternet.com/chromeapi/dawn/v1/userreward/keepalive"
     get_points_url = "https://ext-api.dawninternet.com/api/atom/v1/userreferral/getpoint"
     extension_id = "fpdkjdnhkakefebpekbdhillbhonfjjp"
-    _v = "1.1.5"
+    _v = "1.1.8"
 
     while attempt < max_retries:
         attempt += 1

@@ -510,6 +510,11 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
     password = account.get("password")
     proxy = account.get("proxy") if use_proxy else None
 
+    # Read config to check if account is whitelisted
+    config_data = read_config(config_file)
+    whitelisted_accounts = config_data.get("whitelisted_accounts", [])
+    is_whitelisted = email in whitelisted_accounts
+
     if not should_process_account(account, success_delay):
         message = (
             "ℹ️ *Get Points Skipped Notification* ℹ️\n\n"
@@ -519,14 +524,13 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             "⚙️ *Reason:* Last success within 24 hours\n\n"
             "🤖 *Bot made by https://t.me/AirdropInsiderID*"
         )
-        return email, False, 0, message
+        # Only send message if account is whitelisted
+        if is_whitelisted:
+            return email, False, 0, message
+        return email, False, 0, None
 
     session = None
     try:
-        # if proxy and not check_proxy(proxy):
-        #     logging.error(f"Proxy {proxy} for {email} is not active.")
-        #     return email, False, 0, "Proxy not active"
-
         session = create_session(proxy)
         headers = {
             "Authorization": f"Bearer {token}",
@@ -539,7 +543,9 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             if not new_token:
                 logging.error(f"Login failed for {email}, setting is_login_failed: true")
                 update_config_with_token(None, read_config(config_file), email, config_file, is_failed_login=True)
-                return email, False, 0, "Login failed, is_login_failed set to true"
+                if is_whitelisted:
+                    return email, False, 0, "Login failed, is_login_failed set to true"
+                return email, False, 0, None
 
             token = new_token
             headers["Authorization"] = f"Bearer {token}"
@@ -554,14 +560,18 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                     logging.success(f"Success get points for {email}: {points} points")
                     # Hapus is_login_failed jika ada
                     update_config_with_token({"status": True, "data": {"token": token}}, read_config(config_file), email, config_file, is_failed_login=False)
-                    return email, True, points, f"Success: {points} points"
+                    if is_whitelisted:
+                        return email, True, points, f"Success: {points} points"
+                    return email, True, points, None
 
             except Exception as e:
                 logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {e}")
                 if attempt == max_retries:
                     logging.error(f"Failed to get points for {email} after {max_retries} attempts.")
                     update_config_with_token(None, read_config(config_file), email, config_file, is_failed_login=True)
-                    return email, False, 0, "Failed to get points, is_login_failed set to true"
+                    if is_whitelisted:
+                        return email, False, 0, "Failed to get points, is_login_failed set to true"
+                    return email, False, 0, None
                 time.sleep(retry_delay)
                 continue
     finally:
@@ -587,7 +597,8 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
     async def telegram_worker():
         while True:
             message = await message_queue.get()
-            await telegram_message(bot, chat_id, message)
+            if message:  # Only send if message is not None
+                await telegram_message(bot, chat_id, message)
             message_queue.task_done()
 
     accounts = config.get("accounts", [])
@@ -615,7 +626,7 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
                     ])
 
                     for email, success, points, message in results:
-                        if use_telegram:
+                        if use_telegram and message:  # Only send if message is not None
                             await message_queue.put(message)
                         logging.info(f"Get points for {email} completed with status: {'success' if success else 'failed'}, points: {points}")
                         if success:
@@ -630,7 +641,6 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
                         pool.join()
                         logging.debug("Pool closed for batch")
 
-            # log_total_points(total_cycle_points, successful_accounts, len(accounts), total_point_log)
             logging.info(f"Get points cycle completed. Waiting {get_points_interval} seconds for next cycle.")
         except Exception as e:
             logging.error(f"Error in get points cycle: {e}")
