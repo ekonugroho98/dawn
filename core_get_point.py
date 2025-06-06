@@ -73,73 +73,38 @@ def read_config(config_file):
         return {}
 
 def update_config_with_token(login_response, config_data, email, config_file, is_failed_login=None):
-    lock = FileLock(f"{config_file}.lock")
     logging.info(f"Attempting to update token for {email}")
 
     try:
-        with lock:
-            logging.info(f"Acquired lock for {email}")
-            # Always read the latest config data
-            try:
-                with open(config_file, 'r') as f:
-                    config_data = json.load(f)
-                logging.info(f"Successfully read config file for {email}")
-            except Exception as e:
-                logging.error(f"Failed to read config file for {email}: {e}")
-                return config_data
+        # Always read the latest config data
+        try:
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+            logging.info(f"Successfully read config file for {email}")
+        except Exception as e:
+            logging.error(f"Failed to read config file for {email}: {e}")
+            return config_data
 
-            if "accounts" not in config_data:
-                config_data["accounts"] = []
-                logging.info(f"Created accounts list for {email}")
-
-            updated = False
-            for account in config_data["accounts"]:
-                if account.get("email") == email:
-                    if login_response and login_response.get("status"):
-                        token = login_response["data"].get("token")
-                        if token:
-                            old_token = account.get("token", "")
-                            account["token"] = token
-                            # Set is_login_failed to false when token is successfully updated
-                            account["is_login_failed"] = False
-                            logging.info(f"Token updated for {email}. Old token: {old_token[:20]}... New token: {token[:20]}...")
-                    else:
-                        account["token"] = ""  # Kosongkan token jika login gagal
-                        if is_failed_login is not None:
-                            account["is_login_failed"] = is_failed_login
-                        logging.info(f"Token cleared for {email} due to failed login")
-                    updated = True
-                    break
-
-            if updated:
-                try:
-                    with open(config_file, "w") as f:
-                        json.dump(config_data, f, indent=2)
-                    logging.info(f"Config file successfully updated for {email}")
-                except Exception as e:
-                    logging.error(f"Failed to write config file for {email}: {e}")
-            else:
-                logging.warning(f"Account {email} not found in config file")
-
-    except Exception as e:
-        logging.error(f"Error in update_config_with_token for {email}: {e}")
-    finally:
-        logging.info(f"Released lock for {email}")
-
-    return config_data
-
-
-
-def update_config_with_success(email, config_data, config_file):
-    lock = FileLock(f"{config_file}.lock")
-    with lock:
         if "accounts" not in config_data:
             config_data["accounts"] = []
+            logging.info(f"Created accounts list for {email}")
 
         updated = False
         for account in config_data["accounts"]:
-            if account["email"] == email:
-                account["last_success"] = datetime.now().isoformat()
+            if account.get("email") == email:
+                if login_response and login_response.get("status"):
+                    token = login_response["data"].get("token")
+                    if token:
+                        old_token = account.get("token", "")
+                        account["token"] = token
+                        # Set is_login_failed to false when token is successfully updated
+                        account["is_login_failed"] = False
+                        logging.info(f"Token updated for {email}. Old token: {old_token[:20]}... New token: {token[:20]}...")
+                else:
+                    account["token"] = ""  # Kosongkan token jika login gagal
+                    if is_failed_login is not None:
+                        account["is_login_failed"] = is_failed_login
+                    logging.info(f"Token cleared for {email} due to failed login")
                 updated = True
                 break
 
@@ -147,24 +112,47 @@ def update_config_with_success(email, config_data, config_file):
             try:
                 with open(config_file, "w") as f:
                     json.dump(config_data, f, indent=2)
-                logging.info(f"Last success timestamp updated for {email}")
+                logging.info(f"Config file successfully updated for {email}")
             except Exception as e:
-                logging.error(f"Failed to update config for {email}: {e}")
+                logging.error(f"Failed to write config file for {email}: {e}")
         else:
-            logging.warning(f"Last success not updated for {email}, account not found.")
+            logging.warning(f"Account {email} not found in config file")
 
+    except Exception as e:
+        logging.error(f"Error in update_config_with_token for {email}: {e}")
+
+    return config_data
+
+def update_config_with_success(email, config_data, config_file):
+    if "accounts" not in config_data:
+        config_data["accounts"] = []
+
+    updated = False
+    for account in config_data["accounts"]:
+        if account["email"] == email:
+            account["last_success"] = datetime.now().isoformat()
+            updated = True
+            break
+
+    if updated:
+        try:
+            with open(config_file, "w") as f:
+                json.dump(config_data, f, indent=2)
+            logging.info(f"Last success timestamp updated for {email}")
+        except Exception as e:
+            logging.error(f"Failed to update config for {email}: {e}")
+    else:
+        logging.warning(f"Last success not updated for {email}, account not found.")
 
 def log_total_points(total_points, successful_accounts, total_accounts, total_point_log):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_entry = f"{timestamp} - Cycle Total Points: {total_points} - Successful Accounts: {successful_accounts}/{total_accounts}\n"
-    lock = FileLock(f"{total_point_log}.lock")
-    with lock:
-        try:
-            with open(total_point_log, "a") as f:
-                f.write(log_entry)
-            logging.info(f"Logged total points ({total_points}) to {total_point_log}")
-        except Exception as e:
-            logging.error(f"Failed to log total points to {total_point_log}: {e}")
+    try:
+        with open(total_point_log, "a") as f:
+            f.write(log_entry)
+        logging.info(f"Logged total points ({total_points}) to {total_point_log}")
+    except Exception as e:
+        logging.error(f"Failed to log total points to {total_point_log}: {e}")
 
 def log_not_referred(email, referred_by, not_referral_log):
             logging.error(f"Failed to log not referred to {not_referral_log} for {email}, referredBy: {referred_by}")
@@ -327,7 +315,7 @@ def perform_login(session, puzzle_id, captcha_solution, email, password, appid):
         logging.error(f"Login error for {email}: {json.dumps(error_details, indent=2)}")
         return error_details
 
-def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1):
+def re_login(email, password, appid, proxy=None, config_file=None, max_retries=3):
     session = create_session(proxy)
     captcha_file = None
 
@@ -354,7 +342,7 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=1
 
             captcha_solution = solve_captcha(captcha_file)
             if not captcha_solution:
-                logging.error(f"Failed to solve captcha for {email}")
+                logging.error(f"Failed to solve captcha for {email} (attempt {attempt + 1}/{max_retries})")
                 time.sleep(5)
                 continue
 
@@ -558,8 +546,10 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                 success, points, status_message = total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir)
                 if success:
                     logging.success(f"Success get points for {email}: {points} points")
-                    # Hapus is_login_failed jika ada
-                    update_config_with_token({"status": True, "data": {"token": token}}, read_config(config_file), email, config_file, is_failed_login=False)
+                    # Update token dan last_success
+                    config_data = read_config(config_file)
+                    update_config_with_token({"status": True, "data": {"token": token}}, config_data, email, config_file, is_failed_login=False)
+                    update_config_with_success(email, config_data, config_file)
                     if is_whitelisted:
                         return email, True, points, f"Success: {points} points"
                     return email, True, points, None
