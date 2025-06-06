@@ -174,14 +174,38 @@ def keep_alive(headers, email, session, appid, base_keepalive_url, extension_id,
         else:
             reason = f"Message key not found in response data: {json_response}"
             logging.warning(reason)
+            # Log curl command for debugging
+            curl_command = f"curl -X POST '{keepalive_url}'"
+            for key, value in headers.items():
+                curl_command += f" -H '{key}: {value}'"
+            curl_command += f" -d '{json.dumps(keepalive_payload)}'"
+            if session.proxies.get("http"):
+                curl_command += f" --proxy '{session.proxies['http']}'"
+            logging.error(f"Curl command for debugging:\n{curl_command}")
             log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
             return False, "Message key not found in response data"
     except requests.exceptions.RequestException as e:
         reason = f"Request failed: {str(e)}"
+        # Log curl command for debugging
+        curl_command = f"curl -X POST '{keepalive_url}'"
+        for key, value in headers.items():
+            curl_command += f" -H '{key}: {value}'"
+        curl_command += f" -d '{json.dumps(keepalive_payload)}'"
+        if session.proxies.get("http"):
+            curl_command += f" --proxy '{session.proxies['http']}'"
+        logging.error(f"Curl command for debugging:\n{curl_command}")
         log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
         return False, reason
     except ValueError as e:
         reason = f"Invalid JSON response: {str(e)}, content: {response.text}"
+        # Log curl command for debugging
+        curl_command = f"curl -X POST '{keepalive_url}'"
+        for key, value in headers.items():
+            curl_command += f" -H '{key}: {value}'"
+        curl_command += f" -d '{json.dumps(keepalive_payload)}'"
+        if session.proxies.get("http"):
+            curl_command += f" --proxy '{session.proxies['http']}'"
+        logging.error(f"Curl command for debugging:\n{curl_command}")
         log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
         return False, reason
 
