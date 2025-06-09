@@ -11,6 +11,8 @@ from asyncio import Queue
 from multiprocessing import Pool
 from datetime import datetime
 from fake_useragent import UserAgent
+import os
+import re
 
 CONFIG_FILE = "config.json"
 ERROR_LOG_FILE = "log-error.txt"
@@ -209,145 +211,197 @@ def keep_alive(headers, email, session, appid):
 # Queue for Telegram messages
 message_queue = Queue()
 
-async def telegram_worker():
+async def telegram_worker(bot_token, chat_id):
     while True:
-        message = await message_queue.get()
-        await telegram_message(message)
-        message_queue.task_done()
-
-async def queue_telegram_message(message):
-    await message_queue.put(message)
-
-async def telegram_message(message):
-    if use_telegram:
         try:
+            message = await message_queue.get()
+            if message:  # Only send if message is not None
+                if isinstance(message, list):
+                    for msg in message:
+                        await telegram_message(bot_token, chat_id, msg)
+                else:
+                    await telegram_message(bot_token, chat_id, message)
+                logging.info(f"Telegram message sent: {message[:100]}...")
+            message_queue.task_done()
+        except Exception as e:
+            logging.error(f"Error in telegram worker: {e}")
+            await asyncio.sleep(1)
+
+async def telegram_message(bot_token, chat_id, message):
+    if bot_token and chat_id:
+        try:
+            bot = telegram.Bot(token=bot_token)
             await bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
-            await asyncio.sleep(1)  # Delay of 1 second after sending the message
+            await asyncio.sleep(1)
         except Exception as e:
             logging.error(f"Error sending Telegram message: {e}")
 
-def process_account(account, max_retries=3, retry_delay=5):
+def process_account(account, config_file, log_error_file, use_proxy, bot_token=None, chat_id=None, max_retries=3, retry_delay=5):
     email = account["email"]
-    token = account["token"]
+    token = account.get("token")
     appid = account["appid"]
+    password = account.get("password")
     proxy = account.get("proxy") if use_proxy else None
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    # Get source account from config file name
+    source_account = os.path.basename(config_file).replace("config_", "").replace(".json", "")
 
-    attempt = 0
+    session = None
+    try:
+        if proxy and not check_proxy(proxy):
+            logging.error(f"Proxy {proxy} for {email} is not active.")
+            message = (
+                "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
+                f"👤 *Account:* {email}\n\n"
+                "❌ *Status:* Proxy Not Active\n\n"
+                f"🛠️ *Proxy:* {proxy}\n\n"
+                f"📁 *Source:* Account {source_account}\n\n"
+                "⚙️ *Action Required:* Please check proxy status.\n\n"
+                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+            )
+            return email, False, message, bot_token, chat_id
 
-    while attempt < max_retries:
-        attempt += 1
-        session = None
-        try:
-            if proxy and not check_proxy(proxy):
-                logging.error(f"Attempt {attempt}/{max_retries}: Proxy {proxy} for {email} is not active.")
-                if attempt == max_retries:
+        session = create_session(proxy)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        if not token:
+            logging.info(f"No valid token for {email}. Attempting login...")
+            new_token = re_login(email, password, appid, proxy, config_file)
+            if not new_token:
+                message = (
+                    "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
+                    f"👤 *Account:* {email}\n\n"
+                    "❌ *Status:* Login Failed\n\n"
+                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                    f"📁 *Source:* Account {source_account}\n\n"
+                    "⚙️ *Action Required:* Check credentials or CAPTCHA solver.\n\n"
+                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                )
+                return email, False, message, bot_token, chat_id
+            token = new_token
+            headers["Authorization"] = f"Bearer {token}"
+
+        attempt = 0
+        while attempt < max_retries:
+            attempt += 1
+            try:
+                success, status_message = keep_alive(headers, email, session, appid)
+                if success:
                     message = (
-                        "⚠️ *Failure Notification* ⚠️\n\n"
+                        "✅ *🌟 Keep Alive Success Notification 🌟* ✅\n\n"
                         f"👤 *Account:* {email}\n\n"
-                        "❌ *Status:* Proxy Not Active\n\n"
-                        f"🛠️ *Proxy:* {proxy}\n\n"
-                        f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                        "⚙️ *Action Required:* Please check proxy status.\n\n"
+                        f"📢 *Message:* {status_message}\n\n"
+                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                        f"📁 *Source:* Account {source_account}\n\n"
                         "🤖 *Bot made by https://t.me/AirdropInsiderID*"
                     )
-                    return email, False, message
+                    logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'}. Reason: {status_message}")
+                    return email, True, message, bot_token, chat_id
                 else:
-                    logging.info(f"Retrying after {retry_delay} seconds...")
-                    time.sleep(retry_delay)
-                    continue
-
-            session = create_session(proxy)
-            success, status_message = keep_alive(headers, email, session, appid)
-
-            if success:
-                # points = total_points(headers, session)
-                # message = (
-                #     "✅ *🌟 Success Notification 🌟* ✅\n\n"
-                #     f"👤 *Account:* {email}\n\n"
-                #     f"💰 *Points Earned:* {points}\n\n"
-                #     f"📢 *Message:* {status_message}\n\n"
-                #     f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                #     "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                # )
-                # logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
-                return email, True, message
-            else:
-                logging.error(f"Attempt {attempt}/{max_retries}: Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+                    logging.error(f"Attempt {attempt}/{max_retries}: Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+                    if attempt == max_retries:
+                        message = (
+                            "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
+                            f"👤 *Account:* {email}\n\n"
+                            "❌ *Status:* Keep Alive Failed\n\n"
+                            f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                            f"📁 *Source:* Account {source_account}\n\n"
+                            f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
+                            "⚙️ *Action Required:* Please check account or proxy status.\n\n"
+                            "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+                        )
+                        return email, False, message, bot_token, chat_id
+                    else:
+                        logging.info(f"Retrying after {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                        continue
+            except Exception as e:
+                logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {str(e)}")
                 if attempt == max_retries:
                     message = (
-                        "⚠️ *Failure Notification* ⚠️\n\n"
+                        "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
                         f"👤 *Account:* {email}\n\n"
-                        "❌ *Status:* Keep Alive Failed\n\n"
+                        "❌ *Status:* Keep Alive Error\n\n"
                         f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+                        f"📁 *Source:* Account {source_account}\n\n"
                         f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
+                        f"📢 *Error:* {str(e)}\n\n"
                         "⚙️ *Action Required:* Please check account or proxy status.\n\n"
                         "🤖 *Bot made by https://t.me/AirdropInsiderID*"
                     )
-                    return email, False, message
+                    return email, False, message, bot_token, chat_id
                 else:
                     logging.info(f"Retrying after {retry_delay} seconds...")
                     time.sleep(retry_delay)
                     continue
-        except requests.exceptions.RequestException as e:
-            error_message = str(e)
-            logging.error(f"Attempt {attempt}/{max_retries}: Network error for {email}: {error_message}")
-            if attempt == max_retries:
-                message = (
-                    "⚠️ *Failure Notification* ⚠️\n\n"
-                    f"👤 *Account:* {email}\n\n"
-                    "❌ *Status:* Network Error\n\n"
-                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                    f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                    "⚙️ *Action Required:* Check network or proxy.\n\n"
-                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                )
-                return email, False, message
-            else:
-                logging.info(f"Retrying after {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                continue
-        finally:
-            if session:
-                session.close()
+    except Exception as e:
+        logging.error(f"Error processing account {email}: {str(e)}")
+        message = (
+            "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
+            f"👤 *Account:* {email}\n\n"
+            "❌ *Status:* Processing Error\n\n"
+            f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
+            f"📁 *Source:* Account {source_account}\n\n"
+            f"📢 *Error:* {str(e)}\n\n"
+            "⚙️ *Action Required:* Please check account or proxy status.\n\n"
+            "🤖 *Bot made by https://t.me/AirdropInsiderID*"
+        )
+        return email, False, message, bot_token, chat_id
+    finally:
+        if session:
+            session.close()
 
 async def main():
     accounts = read_account()
     logging.info(f"Total accounts to process: {len(accounts)}")
 
-    # Start the Telegram message worker
-    telegram_task = asyncio.create_task(telegram_worker())
+    config = read_config()
+    bot_token = config.get("telegram_bot_token")
+    chat_id = config.get("telegram_chat_id")
+    use_proxy = config.get("use_proxy", False)
+    use_telegram = config.get("use_telegram", False)
+    poll_interval = config.get("poll_interval", 120)  # Default to 120 seconds
+
+    if use_telegram and (not bot_token or not chat_id):
+        logging.error("Missing 'bot_token' or 'chat_id' in config.")
+        return
+
+    message_queue = asyncio.Queue()
+
+    telegram_task = asyncio.create_task(telegram_worker(bot_token, chat_id)) if use_telegram else None
 
     while True:
-        pool = None
         try:
-            pool = Pool(processes=2)  # Jalankan 2 akun secara bersamaan
-            results = pool.map(process_account, accounts)
+            pool = None
+            try:
+                pool = Pool(processes=10)
+                results = pool.starmap(process_account, [
+                    (account, CONFIG_FILE, ERROR_LOG_FILE, use_proxy, bot_token, chat_id)
+                    for account in accounts
+                ])
 
-            for email, success, message in results:
-                await queue_telegram_message(message)
-                logging.info(f"Account {email} completed with status: {'success' if success else 'failed'}")
+                for email, success, message, _, _ in results:
+                    if use_telegram and message:  # Only send if message is not None
+                        await message_queue.put(message)
+                        logging.info(f"Message queued for {email}")
+                    logging.info(f"Keep alive for {email} completed with status: {'success' if success else 'failed'}")
+            except Exception as e:
+                logging.error(f"Error in main loop: {e}")
+                continue
+            finally:
+                if pool:
+                    pool.close()
+                    pool.join()
 
-            logging.info(f"All accounts processed. Waiting {poll_interval} seconds before next cycle.")
+            logging.info(f"Keep alive cycle completed. Waiting {poll_interval} seconds for next cycle.")
             await asyncio.sleep(poll_interval)
         except Exception as e:
             logging.error(f"Error in main loop: {e}")
             await asyncio.sleep(10)
-        finally:
-            if pool:
-                pool.close()
-                pool.join()
+            continue
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logging.info("Script stopped by user.")
-    except Exception as e:
-        logging.error(f"Unexpected error: {e}")
-    finally:
-        logging.info("Cleaning up resources...")
+    asyncio.run(main())
