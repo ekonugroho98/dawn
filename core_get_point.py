@@ -574,6 +574,7 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
     chat_id = config.get("telegram_chat_id")
     use_proxy = config.get("use_proxy", False)
     use_telegram = config.get("use_telegram", True)  # Enable Telegram notifications
+    whitelist_accounts = config.get("whitelist_accounts", [])  # Get whitelist accounts from config
 
     if use_telegram and (not bot_token or not chat_id):
         logging.error("Missing 'bot_token' or 'chat_id' in config.")
@@ -596,9 +597,9 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
                 ])
 
                 for email, success, message, _, _ in results:
-                    if use_telegram and message:  # Only send if message is not None
+                    if use_telegram and message and email in whitelist_accounts:  # Only send if account is in whitelist
                         await message_queue.put(message)
-                        logging.info(f"Message queued for {email}")
+                        logging.info(f"Message queued for whitelisted account {email}")
                     logging.info(f"Get points for {email} completed with status: {'success' if success else 'failed'}")
             except Exception as e:
                 logging.error(f"Error in main loop: {e}")
