@@ -261,7 +261,6 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
     email = account["email"]
     token = account.get("token")
     appid = account["appid"]
-    password = account.get("password")
     proxy = account.get("proxy") if use_proxy else None
 
     # Get source account from config file name
@@ -285,12 +284,8 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
         }
 
         if not token:
-            logging.info(f"No valid token for {email}. Attempting login...")
-            new_token = re_login(email, password, appid, proxy, config_file)
-            if not new_token:
-                return email, False, None, bot_token, chat_id
-            token = new_token
-            headers["Authorization"] = f"Bearer {token}"
+            logging.error(f"No valid token for {email}. Skipping...")
+            return email, False, None, bot_token, chat_id
 
         attempt = 0
         while attempt < max_retries:
@@ -298,16 +293,8 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
             try:
                 success, status_message = keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v, log_error_file)
                 if success:
-                    message = (
-                        "✅ *🌟 Keep Alive Success Notification 🌟* ✅\n\n"
-                        f"👤 *Account:* {email}\n\n"
-                        f"📢 *Message:* {status_message}\n\n"
-                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                        f"📁 *Source:* Account {source_account}\n\n"
-                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                    )
                     logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'}. Reason: {status_message}")
-                    return email, True, message, bot_token, chat_id
+                    return email, True, None, bot_token, chat_id
                 else:
                     logging.error(f"Attempt {attempt}/{max_retries}: Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
                     if attempt == max_retries:
@@ -339,17 +326,13 @@ async def run_keep_alive(config_file, log_error_file, poll_interval=300):
     bot_token = config.get("telegram_bot_token")
     chat_id = config.get("telegram_chat_id")
     use_proxy = config.get("use_proxy", False)
-    use_telegram = config.get("use_telegram", False)
-
-    if use_telegram and (not bot_token or not chat_id):
-        logging.error("Missing 'bot_token' or 'chat_id' in config.")
-        return
+    use_telegram = False  # Disable Telegram notifications
 
     # Create new message queue for this run
     global message_queue
     message_queue = asyncio.Queue()
 
-    telegram_task = asyncio.create_task(telegram_worker(bot_token, chat_id)) if use_telegram else None
+    telegram_task = None  # No Telegram task needed
 
     while True:
         try:
@@ -362,9 +345,6 @@ async def run_keep_alive(config_file, log_error_file, poll_interval=300):
                 ])
 
                 for email, success, message, _, _ in results:
-                    if use_telegram and message:  # Only send if message is not None
-                        await message_queue.put(message)
-                        logging.info(f"Message queued for {email}")
                     logging.info(f"Keep alive for {email} completed with status: {'success' if success else 'failed'}")
             except Exception as e:
                 logging.error(f"Error in main loop: {e}")

@@ -281,16 +281,8 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
             try:
                 success, status_message = keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v, log_error_file)
                 if success:
-                    message = (
-                        "✅ *🌟 Keep Alive Success Notification 🌟* ✅\n\n"
-                        f"👤 *Account:* {email}\n\n"
-                        f"📢 *Message:* {status_message}\n\n"
-                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                        f"📁 *Source:* Account {source_account}\n\n"
-                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                    )
                     logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'}. Reason: {status_message}")
-                    return email, True, message, bot_token, chat_id
+                    return email, True, None, bot_token, chat_id
                 else:
                     logging.error(f"Attempt {attempt}/{max_retries}: Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
                     if attempt == max_retries:
@@ -314,26 +306,21 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
         if session:
             session.close()
 
-async def main():
-    accounts = read_account()
+async def run_keep_alive(config_file, log_error_file, poll_interval=300):
+    accounts = read_account(config_file)
     logging.info(f"Total accounts to process: {len(accounts)}")
 
-    config = read_config()
+    config = read_config(config_file)
     bot_token = config.get("telegram_bot_token")
     chat_id = config.get("telegram_chat_id")
     use_proxy = config.get("use_proxy", False)
-    use_telegram = config.get("use_telegram", False)
-    poll_interval = config.get("poll_interval", 120)  # Default to 120 seconds
-
-    if use_telegram and (not bot_token or not chat_id):
-        logging.error("Missing 'bot_token' or 'chat_id' in config.")
-        return
+    use_telegram = False  # Disable Telegram notifications
 
     # Create new message queue for this run
     global message_queue
     message_queue = asyncio.Queue()
 
-    telegram_task = asyncio.create_task(telegram_worker(bot_token, chat_id)) if use_telegram else None
+    telegram_task = None  # No Telegram task needed
 
     while True:
         try:
@@ -341,14 +328,11 @@ async def main():
             try:
                 pool = Pool(processes=10)
                 results = pool.starmap(process_account, [
-                    (account, CONFIG_FILE, ERROR_LOG_FILE, use_proxy, bot_token, chat_id)
+                    (account, config_file, log_error_file, use_proxy, bot_token, chat_id)
                     for account in accounts
                 ])
 
                 for email, success, message, _, _ in results:
-                    if use_telegram and message:  # Only send if message is not None
-                        await message_queue.put(message)
-                        logging.info(f"Message queued for {email}")
                     logging.info(f"Keep alive for {email} completed with status: {'success' if success else 'failed'}")
             except Exception as e:
                 logging.error(f"Error in main loop: {e}")
@@ -366,4 +350,4 @@ async def main():
             continue
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_keep_alive(CONFIG_FILE, ERROR_LOG_FILE))
