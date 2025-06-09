@@ -346,6 +346,13 @@ async def run_keep_alive(config_file, log_error_file, poll_interval=300):
 
                 for email, success, message, _, _ in results:
                     logging.info(f"Keep alive for {email} completed with status: {'success' if success else 'failed'}")
+                    
+                    # Special case for auliaazka1302@gmail.com - 1 minute delay
+                    if email == "auliaazka1302@gmail.com":
+                        logging.info(f"Using 1-minute delay for {email}")
+                        await asyncio.sleep(60)
+                    else:
+                        await asyncio.sleep(poll_interval)
             except Exception as e:
                 logging.error(f"Error in main loop: {e}")
                 continue
@@ -354,8 +361,7 @@ async def run_keep_alive(config_file, log_error_file, poll_interval=300):
                     pool.close()
                     pool.join()
 
-            logging.info(f"Keep alive cycle completed. Waiting {poll_interval} seconds for next cycle.")
-            await asyncio.sleep(poll_interval)
+            logging.info(f"Keep alive cycle completed. Waiting for next cycle.")
         except Exception as e:
             logging.error(f"Error in main loop: {e}")
             await asyncio.sleep(10)
