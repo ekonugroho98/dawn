@@ -515,10 +515,6 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
 
     session = None
     try:
-        if proxy and not check_proxy(proxy):
-            logging.error(f"Proxy {proxy} for {email} is not active.")
-            return email, False, None, bot_token, chat_id
-
         session = create_session(proxy)
         headers = {
             "Authorization": f"Bearer {token}",
