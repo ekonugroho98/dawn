@@ -250,20 +250,16 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
     # Get source account from config file name
     source_account = os.path.basename(config_file).replace("config_", "").replace(".json", "")
 
+    # Define keep alive parameters
+    base_keepalive_url = "https://ext-api.dawninternet.com/chromeapi/dawn/v1/userreward/keepalive"
+    extension_id = "fpdkjdnhkakefebpekbdhillbhonfjjp"
+    _v = "1.1.8"
+
     session = None
     try:
         if proxy and not check_proxy(proxy):
             logging.error(f"Proxy {proxy} for {email} is not active.")
-            message = (
-                "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
-                f"👤 *Account:* {email}\n\n"
-                "❌ *Status:* Proxy Not Active\n\n"
-                f"🛠️ *Proxy:* {proxy}\n\n"
-                f"📁 *Source:* Account {source_account}\n\n"
-                "⚙️ *Action Required:* Please check proxy status.\n\n"
-                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-            )
-            return email, False, message, bot_token, chat_id
+            return email, False, None, bot_token, chat_id
 
         session = create_session(proxy)
         headers = {
@@ -275,16 +271,7 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
             logging.info(f"No valid token for {email}. Attempting login...")
             new_token = re_login(email, password, appid, proxy, config_file)
             if not new_token:
-                message = (
-                    "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
-                    f"👤 *Account:* {email}\n\n"
-                    "❌ *Status:* Login Failed\n\n"
-                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                    f"📁 *Source:* Account {source_account}\n\n"
-                    "⚙️ *Action Required:* Check credentials or CAPTCHA solver.\n\n"
-                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                )
-                return email, False, message, bot_token, chat_id
+                return email, False, None, bot_token, chat_id
             token = new_token
             headers["Authorization"] = f"Bearer {token}"
 
@@ -307,17 +294,7 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
                 else:
                     logging.error(f"Attempt {attempt}/{max_retries}: Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
                     if attempt == max_retries:
-                        message = (
-                            "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
-                            f"👤 *Account:* {email}\n\n"
-                            "❌ *Status:* Keep Alive Failed\n\n"
-                            f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                            f"📁 *Source:* Account {source_account}\n\n"
-                            f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                            "⚙️ *Action Required:* Please check account or proxy status.\n\n"
-                            "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                        )
-                        return email, False, message, bot_token, chat_id
+                        return email, False, None, bot_token, chat_id
                     else:
                         logging.info(f"Retrying after {retry_delay} seconds...")
                         time.sleep(retry_delay)
@@ -325,35 +302,14 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
             except Exception as e:
                 logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {str(e)}")
                 if attempt == max_retries:
-                    message = (
-                        "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
-                        f"👤 *Account:* {email}\n\n"
-                        "❌ *Status:* Keep Alive Error\n\n"
-                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                        f"📁 *Source:* Account {source_account}\n\n"
-                        f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                        f"📢 *Error:* {str(e)}\n\n"
-                        "⚙️ *Action Required:* Please check account or proxy status.\n\n"
-                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                    )
-                    return email, False, message, bot_token, chat_id
+                    return email, False, None, bot_token, chat_id
                 else:
                     logging.info(f"Retrying after {retry_delay} seconds...")
                     time.sleep(retry_delay)
                     continue
     except Exception as e:
         logging.error(f"Error processing account {email}: {str(e)}")
-        message = (
-            "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
-            f"👤 *Account:* {email}\n\n"
-            "❌ *Status:* Processing Error\n\n"
-            f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-            f"📁 *Source:* Account {source_account}\n\n"
-            f"📢 *Error:* {str(e)}\n\n"
-            "⚙️ *Action Required:* Please check account or proxy status.\n\n"
-            "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-        )
-        return email, False, message, bot_token, chat_id
+        return email, False, None, bot_token, chat_id
     finally:
         if session:
             session.close()
