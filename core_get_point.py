@@ -495,13 +495,16 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
     password = account.get("password")
     proxy = account.get("proxy") if use_proxy else None
 
+    # Get source account from config file name
+    source_account = os.path.basename(config_file).replace("config_", "").replace(".json", "")
+
     # Read config to check if account is whitelisted
     config_data = read_config(config_file)
     whitelisted_accounts = config_data.get("whitelisted_accounts", [])
     is_whitelisted = email in whitelisted_accounts
 
     if not should_process_account(account, success_delay):
-        message = f"👤 Account: {email}\n💎 Points: Skipped (recent success)"
+        message = f"👤 Account: {email}\n💎 Points: Skipped (recent success)\n📁 Source: Account {source_account}"
         return email, False, 0, message
 
     session = None
@@ -518,7 +521,7 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             if not new_token:
                 logging.error(f"Login failed for {email}")
                 update_config_with_token(None, read_config(config_file), email, config_file, is_failed_login=True)
-                message = f"👤 Account: {email}\n💎 Points: Login Failed"
+                message = f"👤 Account: {email}\n💎 Points: Login Failed\n📁 Source: Account {source_account}"
                 return email, False, 0, message
 
             token = new_token
@@ -532,25 +535,25 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                 success, points, status_message, referral_message = total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir)
                 if success:
                     logging.success(f"Success get points for {email}: {points} points")
-                    message = f"👤 Account: {email}\n💎 Points: {points}"
+                    message = f"👤 Account: {email}\n💎 Points: {points}\n📁 Source: Account {source_account}"
                     if referral_message:
                         return email, True, points, [message, referral_message]
                     return email, True, points, message
                 else:
                     logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {status_message}")
                     if attempt == max_retries:
-                        message = f"👤 Account: {email}\n💎 Points: Failed - {status_message}"
+                        message = f"👤 Account: {email}\n💎 Points: Failed - {status_message}\n📁 Source: Account {source_account}"
                         return email, False, 0, message
                     time.sleep(retry_delay)
             except Exception as e:
                 logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {str(e)}")
                 if attempt == max_retries:
-                    message = f"👤 Account: {email}\n💎 Points: Error - {str(e)}"
+                    message = f"👤 Account: {email}\n💎 Points: Error - {str(e)}\n📁 Source: Account {source_account}"
                     return email, False, 0, message
                 time.sleep(retry_delay)
     except Exception as e:
         logging.error(f"Error processing account {email}: {str(e)}")
-        message = f"👤 Account: {email}\n💎 Points: Error - {str(e)}"
+        message = f"👤 Account: {email}\n💎 Points: Error - {str(e)}\n📁 Source: Account {source_account}"
         return email, False, 0, message
     finally:
         if session:
