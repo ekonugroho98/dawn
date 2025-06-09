@@ -474,6 +474,9 @@ def log_curl_to_file(email, headers, url, payload, proxy, reason, log_error_file
     with open(log_error_file, "a") as f:
         f.write(log_entry)
 
+# Queue for Telegram messages
+message_queue = asyncio.Queue()
+
 async def telegram_message(bot_token, chat_id, message):
     if bot_token and chat_id:
         try:
@@ -484,6 +487,7 @@ async def telegram_message(bot_token, chat_id, message):
             logging.error(f"Error sending Telegram message: {e}")
 
 async def telegram_worker(bot_token, chat_id):
+    global message_queue
     while True:
         try:
             message = await message_queue.get()
@@ -516,16 +520,7 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
     try:
         if proxy and not check_proxy(proxy):
             logging.error(f"Proxy {proxy} for {email} is not active.")
-            message = (
-                "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
-                f"👤 *Account:* {email}\n\n"
-                "❌ *Status:* Proxy Not Active\n\n"
-                f"🛠️ *Proxy:* {proxy}\n\n"
-                f"📁 *Source:* Account {source_account}\n\n"
-                "⚙️ *Action Required:* Please check proxy status.\n\n"
-                "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-            )
-            return email, False, message, bot_token, chat_id
+            return email, False, None, bot_token, chat_id
 
         session = create_session(proxy)
         headers = {
@@ -534,53 +529,32 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
         }
 
         if not token:
-            logging.info(f"No valid token for {email}. Attempting login...")
-            new_token = re_login(email, password, appid, proxy, config_file)
-            if not new_token:
-                message = (
-                    "⚠️ *Keep Alive Failure Notification* ⚠️\n\n"
-                    f"👤 *Account:* {email}\n\n"
-                    "❌ *Status:* Login Failed\n\n"
-                    f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                    f"📁 *Source:* Account {source_account}\n\n"
-                    "⚙️ *Action Required:* Check credentials or CAPTCHA solver.\n\n"
-                    "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                )
-                return email, False, message, bot_token, chat_id
-            token = new_token
-            headers["Authorization"] = f"Bearer {token}"
+            logging.error(f"No valid token for {email}. Skipping...")
+            return email, False, None, bot_token, chat_id
 
         attempt = 0
         while attempt < max_retries:
             attempt += 1
             try:
-                points, status_message = total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir)
-                if points is not None:
-                    message = (
-                        "✅ *🌟 Points Success Notification 🌟* ✅\n\n"
-                        f"👤 *Account:* {email}\n\n"
-                        f"💰 *Points Earned:* {points}\n\n"
-                        f"📢 *Message:* {status_message}\n\n"
-                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                        f"📁 *Source:* Account {source_account}\n\n"
-                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                    )
-                    logging.success(f"Success get points for {email} with proxy {proxy if proxy else 'No proxy'}. Points: {points}")
-                    return email, True, message, bot_token, chat_id
+                result = total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir)
+                if isinstance(result, tuple) and len(result) >= 2:
+                    success, points, status_message, _ = result
+                    if success and points is not None:
+                        message = f"Account: {email}\nPoints: {points}"
+                        logging.success(f"Success get points for {email} with proxy {proxy if proxy else 'No proxy'}. Points: {points}")
+                        return email, True, message, bot_token, chat_id
+                    else:
+                        logging.error(f"Attempt {attempt}/{max_retries}: Failed get points for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+                        if attempt == max_retries:
+                            return email, False, None, bot_token, chat_id
+                        else:
+                            logging.info(f"Retrying after {retry_delay} seconds...")
+                            time.sleep(retry_delay)
+                            continue
                 else:
-                    logging.error(f"Attempt {attempt}/{max_retries}: Failed get points for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
+                    logging.error(f"Invalid result format from total_points for {email}")
                     if attempt == max_retries:
-                        message = (
-                            "⚠️ *Points Failure Notification* ⚠️\n\n"
-                            f"👤 *Account:* {email}\n\n"
-                            "❌ *Status:* Get Points Failed\n\n"
-                            f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                            f"📁 *Source:* Account {source_account}\n\n"
-                            f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                            "⚙️ *Action Required:* Please check account or proxy status.\n\n"
-                            "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                        )
-                        return email, False, message, bot_token, chat_id
+                        return email, False, None, bot_token, chat_id
                     else:
                         logging.info(f"Retrying after {retry_delay} seconds...")
                         time.sleep(retry_delay)
@@ -588,35 +562,14 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             except Exception as e:
                 logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {str(e)}")
                 if attempt == max_retries:
-                    message = (
-                        "⚠️ *Points Failure Notification* ⚠️\n\n"
-                        f"👤 *Account:* {email}\n\n"
-                        "❌ *Status:* Get Points Error\n\n"
-                        f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-                        f"📁 *Source:* Account {source_account}\n\n"
-                        f"🔄 *Attempts:* {max_retries}/{max_retries}\n\n"
-                        f"📢 *Error:* {str(e)}\n\n"
-                        "⚙️ *Action Required:* Please check account or proxy status.\n\n"
-                        "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-                    )
-                    return email, False, message, bot_token, chat_id
+                    return email, False, None, bot_token, chat_id
                 else:
                     logging.info(f"Retrying after {retry_delay} seconds...")
                     time.sleep(retry_delay)
                     continue
     except Exception as e:
         logging.error(f"Error processing account {email}: {str(e)}")
-        message = (
-            "⚠️ *Points Failure Notification* ⚠️\n\n"
-            f"👤 *Account:* {email}\n\n"
-            "❌ *Status:* Processing Error\n\n"
-            f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-            f"📁 *Source:* Account {source_account}\n\n"
-            f"📢 *Error:* {str(e)}\n\n"
-            "⚙️ *Action Required:* Please check account or proxy status.\n\n"
-            "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-        )
-        return email, False, message, bot_token, chat_id
+        return email, False, None, bot_token, chat_id
     finally:
         if session:
             session.close()
@@ -629,12 +582,14 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
     bot_token = config.get("telegram_bot_token")
     chat_id = config.get("telegram_chat_id")
     use_proxy = config.get("use_proxy", False)
-    use_telegram = config.get("use_telegram", False)
+    use_telegram = config.get("use_telegram", True)  # Enable Telegram notifications
 
     if use_telegram and (not bot_token or not chat_id):
         logging.error("Missing 'bot_token' or 'chat_id' in config.")
         return
 
+    # Create new message queue for this run
+    global message_queue
     message_queue = asyncio.Queue()
 
     telegram_task = asyncio.create_task(telegram_worker(bot_token, chat_id)) if use_telegram else None
