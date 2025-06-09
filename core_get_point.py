@@ -191,16 +191,9 @@ def create_session(proxy=None):
     return session
 
 def log_points(email, points, status_message, point_log_dir):
-    safe_email = email.replace('@', '_').replace('.', '_')
-    log_file = os.path.join(point_log_dir, f"{safe_email}.txt")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_entry = f"{timestamp} - Points: {points} - Status: {status_message}\n"
-    try:
-        with open(log_file, "a") as f:
-            f.write(log_entry)
-        logging.info(f"Logged points for {email} to {log_file}")
-    except Exception as e:
-        logging.error(f"Failed to log points for {email} to {log_file}: {e}")
+    log_entry = f"{timestamp} - Points: {points} - Status: {status_message}"
+    logging.info(f"Points for {email}: {log_entry}")
 
 def get_puzzle_id(session, appid):
     url = f"https://ext-api.dawninternet.com/chromeapi/dawn/v1/puzzle/get-puzzle?appid={appid}"
@@ -316,60 +309,58 @@ def perform_login(session, puzzle_id, captcha_solution, email, password, appid):
         return error_details
 
 def re_login(email, password, appid, proxy=None, config_file=None, max_retries=3):
-    session = create_session(proxy)
+    session = None
     captcha_file = None
-
     try:
-        # Kosongkan token terlebih dahulu sebelum re-login
-        config_data = read_config(config_file)
-        update_config_with_token(None, config_data, email, config_file, is_failed_login=None)
-        logging.info(f"Token cleared for {email} before re-login attempt.")
-
+        session = create_session(proxy)
         for attempt in range(max_retries):
-            logging.info(f"Login attempt {attempt + 1}/{max_retries} for {email}")
-            
-            puzzle_id = get_puzzle_id(session, appid)
-            if not puzzle_id:
-                logging.error(f"Failed to get puzzle_id for {email}")
+            try:
+                puzzle_id = get_puzzle_id(session, appid)
+                if not puzzle_id:
+                    logging.error(f"Failed to get puzzle_id for {email}")
+                    time.sleep(5)
+                    continue
+
+                captcha_file = get_captcha_image(session, puzzle_id, appid, email, os.path.dirname(config_file))
+                if not captcha_file:
+                    logging.error(f"Failed to get captcha image for {email}")
+                    time.sleep(5)
+                    continue
+
+                captcha_solution = solve_captcha(captcha_file)
+                if not captcha_solution:
+                    logging.error(f"Failed to solve captcha for {email}")
+                    time.sleep(5)
+                    continue
+
+                login_response = perform_login(session, puzzle_id, captcha_solution, email, password, appid)
+                if login_response and login_response.get("status"):
+                    logging.info(f"Re-login successful for {email}")
+
+                    # Selalu gunakan update_config_with_token untuk menyimpan token
+                    config_data = read_config(config_file)
+                    update_config_with_token(login_response, config_data, email, config_file, is_failed_login=False)
+                    
+                    # Verifikasi token telah diupdate
+                    config_data = read_config(config_file)
+                    for account in config_data.get("accounts", []):
+                        if account.get("email") == email:
+                            new_token = account.get("token", "")
+                            if new_token:
+                                logging.info(f"Token successfully updated in config for {email}")
+                                return new_token
+                            else:
+                                logging.error(f"Token not found in config after update for {email}")
+                    
+                    logging.error(f"Account not found in config after update for {email}")
+                    return None
+
+                logging.error(f"Re-login failed for {email}: {login_response}")
                 time.sleep(5)
-                continue
 
-            captcha_file = get_captcha_image(session, puzzle_id, appid, email, os.path.dirname(config_file))
-            if not captcha_file:
-                logging.error(f"Failed to get captcha image for {email}")
+            except Exception as e:
+                logging.error(f"Error during re-login attempt {attempt + 1} for {email}: {str(e)}")
                 time.sleep(5)
-                continue
-
-            captcha_solution = solve_captcha(captcha_file)
-            if not captcha_solution:
-                logging.error(f"Failed to solve captcha for {email} (attempt {attempt + 1}/{max_retries})")
-                time.sleep(5)
-                continue
-
-            login_response = perform_login(session, puzzle_id, captcha_solution, email, password, appid)
-            if login_response and login_response.get("status"):
-                logging.info(f"Re-login successful for {email}")
-
-                # Selalu gunakan update_config_with_token untuk menyimpan token
-                config_data = read_config(config_file)
-                update_config_with_token(login_response, config_data, email, config_file, is_failed_login=False)
-                
-                # Verifikasi token telah diupdate
-                config_data = read_config(config_file)
-                for account in config_data.get("accounts", []):
-                    if account.get("email") == email:
-                        new_token = account.get("token", "")
-                        if new_token:
-                            logging.info(f"Token successfully updated in config for {email}")
-                            return new_token
-                        else:
-                            logging.error(f"Token not found in config after update for {email}")
-                
-                logging.error(f"Account not found in config after update for {email}")
-                return None
-
-            logging.error(f"Re-login failed for {email}: {login_response}")
-            time.sleep(5)
 
         # Jika semua retry gagal
         logging.error(f"Re-login failed for {email} after {max_retries} attempts")
@@ -387,15 +378,14 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=3
             except Exception as e:
                 logging.warning(f"Failed to delete captcha file '{captcha_file}': {e}")
 
-
-
 def log_to_file(filename, message):
     with open(filename, "a") as f:
         f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
 
-def total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir, max_login_attempts=2):
+def total_points(headers, session, appid, email, password, proxy=None, config_file=None, point_log_dir=None, max_login_attempts=2):
     url = f"https://ext-api.dawninternet.com/api/atom/v1/userreferral/getpoint?appid={appid}"
     login_attempts = 0
+    config = read_config(config_file) if config_file else {}
 
     while login_attempts <= max_login_attempts:
         headers["User-Agent"] = ua.random
@@ -417,16 +407,15 @@ def total_points(headers, session, appid, email, password, proxy, config_file, p
                     reward_point_data.get("bonus_points", 0) +
                     referral_point_data.get("commission", 0)
                 )
-                #  4j1r2lic, ero8ii2k, p3g4fq15
-
+                
+                # Cek referral
+                referral_message = None
                 if referral_point_data.get("referredBy", 0) not in ["4j1r2lic", "ero8ii2k", "p3g4fq15", "c5fovgjs"]:
-                # Kode yang akan dijalankan jika referredBy bukan 4j1r2lic, ero8ii2k, atau p3g4fq15
                     log_not_referred(email, referral_point_data.get("referredBy", 0), "")
-                    pass
-                # log_points(email, points, "Points retrieved successfully", point_log_dir)
-                # config_data = read_config(config_file)
-                # update_config_with_success(email, config_data, config_file)
-                return True, points, "Points retrieved successfully"
+                    referral_message = f"⚠️ *Invalid Referral Alert* ⚠️\n\n👤 Account: {email}\n❌ Invalid Referral: {referral_point_data.get('referredBy', 0)}"
+                
+                log_points(email, points, "Points retrieved successfully", point_log_dir)
+                return True, points, "Points retrieved successfully", referral_message
             else:
                 message = json_response.get("message", "Unknown error")
                 if message == "Your app session expired, Please login again.":
@@ -437,25 +426,30 @@ def total_points(headers, session, appid, email, password, proxy, config_file, p
                         login_attempts += 1
                         time.sleep(5)
                         continue
-                    return False, 0, "Session expired, re-login failed"
-                return False, 0, f"API status false: {json_response}"
-        except (requests.exceptions.RequestException, ValueError, KeyError) as e:
-            response_content = getattr(e.response, 'text', "No response content")
-            try:
-                json_response = json.loads(response_content)
-                message = json_response.get("message", str(e))
-                if message == "Your app session expired, Please login again.":
-                    logging.info(f"Session expired for {email}. Attempting re-login")
-                    new_token = re_login(email, password, appid, proxy, config_file)
-                    if new_token:
-                        headers["Authorization"] = f"Bearer {new_token}"
-                        login_attempts += 1
-                        time.sleep(5)
-                        continue
-                    return False, 0, "Session expired, re-login failed"
-            except json.JSONDecodeError:
-                message = str(e)
-            return False, 0, f"Error fetching points: {message}, Response: {response_content}"
+                    return False, 0, "Session expired, re-login failed", None
+                return False, 0, f"API status false: {message}", None
+        except requests.exceptions.RequestException as e:
+            error_message = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    json_response = e.response.json()
+                    message = json_response.get("message", error_message)
+                    if message == "Your app session expired, Please login again.":
+                        logging.info(f"Session expired for {email}. Attempting re-login")
+                        new_token = re_login(email, password, appid, proxy, config_file)
+                        if new_token:
+                            headers["Authorization"] = f"Bearer {new_token}"
+                            login_attempts += 1
+                            time.sleep(5)
+                            continue
+                        return False, 0, "Session expired, re-login failed", None
+                except (ValueError, json.JSONDecodeError):
+                    message = error_message
+            else:
+                message = error_message
+            return False, 0, f"Request error: {message}", None
+        except Exception as e:
+            return False, 0, f"Unexpected error: {str(e)}", None
 
 def log_curl_to_file(email, headers, url, payload, proxy, reason, log_error_file, response_content=None):
     curl_command = f"curl"
@@ -480,9 +474,10 @@ def log_curl_to_file(email, headers, url, payload, proxy, reason, log_error_file
     with open(log_error_file, "a") as f:
         f.write(log_entry)
 
-async def telegram_message(bot, chat_id, message):
-    if bot:
+async def telegram_message(bot_token, chat_id, message):
+    if bot_token and chat_id:
         try:
+            bot = telegram.Bot(token=bot_token)
             await bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
             await asyncio.sleep(1)
         except Exception as e:
@@ -491,7 +486,9 @@ async def telegram_message(bot, chat_id, message):
 def should_process_account(account, success_delay):
     return True
 
-def process_get_points(account, config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, use_proxy, bot=None, chat_id=None, max_retries=3, retry_delay=5, success_delay=86400):
+def process_get_points(account, config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, use_proxy, bot_token=None, chat_id=None, max_retries=3, retry_delay=5, success_delay=86400):
+    # Create bot instance inside the worker process
+    bot = telegram.Bot(token=bot_token) if bot_token and chat_id else None
     email = account["email"]
     token = account.get("token")
     appid = account["appid"]
@@ -504,18 +501,8 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
     is_whitelisted = email in whitelisted_accounts
 
     if not should_process_account(account, success_delay):
-        message = (
-            "ℹ️ *Get Points Skipped Notification* ℹ️\n\n"
-            f"👤 *Account:* {email}\n\n"
-            "⏭️ *Status:* Skipped (recent success)\n\n"
-            f"🛠️ *Proxy Used:* {proxy if proxy else 'No proxy'}\n\n"
-            "⚙️ *Reason:* Last success within 24 hours\n\n"
-            "🤖 *Bot made by https://t.me/AirdropInsiderID*"
-        )
-        # Only send message if account is whitelisted
-        if is_whitelisted:
-            return email, False, 0, message
-        return email, False, 0, None
+        message = f"👤 Account: {email}\n💎 Points: Skipped (recent success)"
+        return email, False, 0, message
 
     session = None
     try:
@@ -529,11 +516,10 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             logging.info(f"No valid token for {email}. Attempting login...")
             new_token = re_login(email, password, appid, proxy, config_file)
             if not new_token:
-                logging.error(f"Login failed for {email}, setting is_login_failed: true")
+                logging.error(f"Login failed for {email}")
                 update_config_with_token(None, read_config(config_file), email, config_file, is_failed_login=True)
-                if is_whitelisted:
-                    return email, False, 0, "Login failed, is_login_failed set to true"
-                return email, False, 0, None
+                message = f"👤 Account: {email}\n💎 Points: Login Failed"
+                return email, False, 0, message
 
             token = new_token
             headers["Authorization"] = f"Bearer {token}"
@@ -543,27 +529,29 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             attempt += 1
             try:
                 logging.debug(f"Calling total_points for {email}, attempt {attempt}/{max_retries}")
-                success, points, status_message = total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir)
+                success, points, status_message, referral_message = total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir)
                 if success:
                     logging.success(f"Success get points for {email}: {points} points")
-                    # Update token dan last_success
-                    config_data = read_config(config_file)
-                    update_config_with_token({"status": True, "data": {"token": token}}, config_data, email, config_file, is_failed_login=False)
-                    update_config_with_success(email, config_data, config_file)
-                    if is_whitelisted:
-                        return email, True, points, f"Success: {points} points"
-                    return email, True, points, None
-
+                    message = f"👤 Account: {email}\n💎 Points: {points}"
+                    if referral_message:
+                        return email, True, points, [message, referral_message]
+                    return email, True, points, message
+                else:
+                    logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {status_message}")
+                    if attempt == max_retries:
+                        message = f"👤 Account: {email}\n💎 Points: Failed - {status_message}"
+                        return email, False, 0, message
+                    time.sleep(retry_delay)
             except Exception as e:
-                logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {e}")
+                logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {str(e)}")
                 if attempt == max_retries:
-                    logging.error(f"Failed to get points for {email} after {max_retries} attempts.")
-                    update_config_with_token(None, read_config(config_file), email, config_file, is_failed_login=True)
-                    if is_whitelisted:
-                        return email, False, 0, "Failed to get points, is_login_failed set to true"
-                    return email, False, 0, None
+                    message = f"👤 Account: {email}\n💎 Points: Error - {str(e)}"
+                    return email, False, 0, message
                 time.sleep(retry_delay)
-                continue
+    except Exception as e:
+        logging.error(f"Error processing account {email}: {str(e)}")
+        message = f"👤 Account: {email}\n💎 Points: Error - {str(e)}"
+        return email, False, 0, message
     finally:
         if session:
             session.close()
@@ -580,16 +568,23 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
         logging.error("Missing 'bot_token' or 'chat_id' in config.")
         return
 
-    bot = telegram.Bot(token=bot_token) if use_telegram else None
-
-    message_queue = Queue()
+    message_queue = asyncio.Queue()
 
     async def telegram_worker():
         while True:
-            message = await message_queue.get()
-            if message:  # Only send if message is not None
-                await telegram_message(bot, chat_id, message)
-            message_queue.task_done()
+            try:
+                message = await message_queue.get()
+                if message:  # Only send if message is not None
+                    if isinstance(message, list):
+                        for msg in message:
+                            await telegram_message(bot_token, chat_id, msg)
+                    else:
+                        await telegram_message(bot_token, chat_id, message)
+                    logging.info(f"Telegram message sent: {message[:100]}...")
+                message_queue.task_done()
+            except Exception as e:
+                logging.error(f"Error in telegram worker: {e}")
+                await asyncio.sleep(1)
 
     accounts = config.get("accounts", [])
     logging.info(f"Starting get points cycle for {len(accounts)} accounts every 1 hour")
@@ -611,13 +606,14 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
                 try:
                     pool = Pool(processes=batch_size)
                     results = pool.starmap(process_get_points, [
-                        (account, config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, use_proxy, bot, chat_id)
+                        (account, config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, use_proxy, bot_token, chat_id)
                         for account in batch
                     ])
 
                     for email, success, points, message in results:
                         if use_telegram and message:  # Only send if message is not None
                             await message_queue.put(message)
+                            logging.info(f"Message queued for {email}")
                         logging.info(f"Get points for {email} completed with status: {'success' if success else 'failed'}, points: {points}")
                         if success:
                             total_cycle_points += points
@@ -629,14 +625,13 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
                     if pool:
                         pool.close()
                         pool.join()
-                        logging.debug("Pool closed for batch")
 
             logging.info(f"Get points cycle completed. Waiting {get_points_interval} seconds for next cycle.")
+            await asyncio.sleep(get_points_interval)
         except Exception as e:
             logging.error(f"Error in get points cycle: {e}")
+            await asyncio.sleep(10)
             continue
-
-        await asyncio.sleep(get_points_interval)
 
 if __name__ == "__main__":
     import sys
