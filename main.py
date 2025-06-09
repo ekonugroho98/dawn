@@ -104,7 +104,7 @@ config = read_config(CONFIG_FILE)
 bot_token = config.get("telegram_bot_token")
 chat_id = config.get("telegram_chat_id")
 use_proxy = config.get("use_proxy", False)
-use_telegram = config.get("use_telegram", False)
+use_telegram = config.get("use_telegram", True)
 poll_interval = config.get("poll_interval", 120)  # Default to 120 seconds
 
 if use_telegram and (not bot_token or not chat_id):

@@ -180,7 +180,7 @@ config = read_config(CONFIG_FILE)
 bot_token = config.get("telegram_bot_token")
 chat_id = config.get("telegram_chat_id")
 use_proxy = config.get("use_proxy", False)
-use_telegram = config.get("use_telegram", False)
+use_telegram = config.get("use_telegram", True)
 get_points_interval = 3600  # 1 hour in seconds
 success_delay = 86400  # 24 hours in seconds
 

@@ -471,27 +471,33 @@ message_queue = asyncio.Queue()
 async def telegram_message(bot_token, chat_id, message):
     if bot_token and chat_id:
         try:
+            logging.info(f"Attempting to send Telegram message to chat {chat_id}")
             bot = telegram.Bot(token=bot_token)
             await bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
+            logging.info(f"Successfully sent Telegram message: {message[:100]}...")
             await asyncio.sleep(1)
         except Exception as e:
-            logging.error(f"Error sending Telegram message: {e}")
+            logging.error(f"Error sending Telegram message: {str(e)}")
+            logging.error(f"Bot token: {bot_token[:10]}...")
+            logging.error(f"Chat ID: {chat_id}")
+            logging.error(f"Message: {message[:100]}...")
 
 async def telegram_worker(bot_token, chat_id):
     global message_queue
+    logging.info(f"Starting Telegram worker with chat ID: {chat_id}")
     while True:
         try:
             message = await message_queue.get()
             if message:  # Only send if message is not None
+                logging.info(f"Processing message from queue: {message[:100]}...")
                 if isinstance(message, list):
                     for msg in message:
                         await telegram_message(bot_token, chat_id, msg)
                 else:
                     await telegram_message(bot_token, chat_id, message)
-                logging.info(f"Telegram message sent: {message[:100]}...")
             message_queue.task_done()
         except Exception as e:
-            logging.error(f"Error in telegram worker: {e}")
+            logging.error(f"Error in telegram worker: {str(e)}")
             await asyncio.sleep(1)
 
 def should_process_account(account, success_delay):
@@ -531,7 +537,11 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                 if isinstance(result, tuple) and len(result) >= 2:
                     success, points, status_message, _ = result
                     if success and points is not None:
-                        message = f"Account: {email}\nPoints: {points}\nSource: Account {source_account}"
+                        message = (
+                            "✅ *🌟 Get Points Success Notification 🌟* ✅\n\n"
+                            f"👤 *Account:* {email}\n"
+                            f"💰 *Points Earned:* {points}\n"
+                        )
                         logging.success(f"Success get points for {email} with proxy {proxy if proxy else 'No proxy'}. Points: {points}")
                         return email, True, message, bot_token, chat_id
                     else:
@@ -574,7 +584,10 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
     chat_id = config.get("telegram_chat_id")
     use_proxy = config.get("use_proxy", False)
     use_telegram = config.get("use_telegram", True)
-    whitelist_accounts = config.get("whitelist_accounts", [])
+    whitelist_accounts = config.get("whitelisted_accounts", [])
+
+    logging.info(f"Telegram settings - use_telegram: {use_telegram}, bot_token: {bool(bot_token)}, chat_id: {chat_id}")
+    logging.info(f"Whitelisted accounts: {whitelist_accounts}")
 
     if use_telegram and (not bot_token or not chat_id):
         logging.error("Missing 'bot_token' or 'chat_id' in config.")
@@ -585,6 +598,7 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
     message_queue = asyncio.Queue()
 
     telegram_task = asyncio.create_task(telegram_worker(bot_token, chat_id)) if use_telegram else None
+    logging.info("Telegram worker task created")
 
     while True:
         try:
@@ -598,6 +612,7 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
 
                 for email, success, message, _, _ in results:
                     if use_telegram and message and email in whitelist_accounts:
+                        logging.info(f"Queueing message for whitelisted account {email}")
                         await message_queue.put(message)
                         logging.info(f"Message queued for whitelisted account {email}")
                     logging.info(f"Get points for {email} completed with status: {'success' if success else 'failed'}")
