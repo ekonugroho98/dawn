@@ -14,6 +14,9 @@ from fake_useragent import UserAgent
 import os
 import re
 
+# Suppress InsecureRequestWarning
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 CONFIG_FILE = "config.json"
 ERROR_LOG_FILE = "log-error.txt"
 
@@ -114,8 +117,6 @@ get_points_url = "https://ext-api.dawninternet.com/api/atom/v1/userreferral/getp
 extension_id = "fpdkjdnhkakefebpekbdhillbhonfjjp"
 _v = "1.1.5"
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 def read_account(filename="config.json"):
     try:
         with open(filename, 'r') as file:
@@ -154,7 +155,7 @@ def total_points(headers, session):
         pass  # Abaikan semua error tanpa logging
     return 0
 
-def log_curl_to_file(email, headers, keepalive_url, keepalive_payload, proxy, reason):
+def log_curl_to_file(email, headers, keepalive_url, keepalive_payload, proxy, reason, log_error_file):
     """Log error details as a curl command to log-error.txt."""
     curl_command = f"curl"
     if proxy:
@@ -172,10 +173,10 @@ def log_curl_to_file(email, headers, keepalive_url, keepalive_payload, proxy, re
         f"---------------------------------------\n"
     )
 
-    with open(ERROR_LOG_FILE, "a") as f:
+    with open(log_error_file, "a") as f:
         f.write(log_entry)
 
-def keep_alive(headers, email, session, appid):
+def keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v, log_error_file):
     keepalive_url = f"{base_keepalive_url}?appid={appid}"
     keepalive_payload = {
         "username": email,
@@ -192,24 +193,27 @@ def keep_alive(headers, email, session, appid):
         json_response = response.json()
         # Periksa message di dalam data.message
         if isinstance(json_response.get("data"), dict) and "message" in json_response["data"]:
-            # logging.success(f"Keepalive response status: {response.status_code}, content: {response.text}")
             return True, json_response["data"]["message"]
         else:
             reason = f"Message key not found in response data: {json_response}"
             logging.warning(reason)
-            log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
+            log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
             return False, "Message key not found in response data"
     except requests.exceptions.RequestException as e:
         reason = f"Request failed: {str(e)}"
-        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
+        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
         return False, reason
     except ValueError as e:
         reason = f"Invalid JSON response: {str(e)}, content: {response.text}"
-        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason)
+        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
+        return False, reason
+    except Exception as e:
+        reason = f"Unexpected error: {str(e)}"
+        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
         return False, reason
 
 # Queue for Telegram messages
-message_queue = Queue()
+message_queue = asyncio.Queue()
 
 async def telegram_worker(bot_token, chat_id):
     while True:
@@ -288,7 +292,7 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
         while attempt < max_retries:
             attempt += 1
             try:
-                success, status_message = keep_alive(headers, email, session, appid)
+                success, status_message = keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v, log_error_file)
                 if success:
                     message = (
                         "✅ *🌟 Keep Alive Success Notification 🌟* ✅\n\n"
@@ -369,6 +373,8 @@ async def main():
         logging.error("Missing 'bot_token' or 'chat_id' in config.")
         return
 
+    # Create new message queue for this run
+    global message_queue
     message_queue = asyncio.Queue()
 
     telegram_task = asyncio.create_task(telegram_worker(bot_token, chat_id)) if use_telegram else None

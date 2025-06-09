@@ -15,6 +15,12 @@ from fake_useragent import UserAgent
 import os
 import re
 
+# Suppress InsecureRequestWarning
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+CONFIG_FILE = "config.json"
+ERROR_LOG_FILE = "log-error.txt"
+
 # Inisialisasi UserAgent untuk menghasilkan User-Agent acak
 ua = UserAgent()
 
@@ -210,6 +216,18 @@ def keep_alive(headers, email, session, appid, base_keepalive_url, extension_id,
         logging.error(f"Curl command for debugging:\n{curl_command}")
         log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
         return False, reason
+    except Exception as e:
+        reason = f"Unexpected error: {str(e)}"
+        # Log curl command for debugging
+        curl_command = f"curl -X POST '{keepalive_url}'"
+        for key, value in headers.items():
+            curl_command += f" -H '{key}: {value}'"
+        curl_command += f" -d '{json.dumps(keepalive_payload)}'"
+        if session.proxies.get("http"):
+            curl_command += f" --proxy '{session.proxies['http']}'"
+        logging.error(f"Curl command for debugging:\n{curl_command}")
+        log_curl_to_file(email, headers, keepalive_url, keepalive_payload, session.proxies.get("http"), reason, log_error_file)
+        return False, reason
 
 async def telegram_message(bot_token, chat_id, message):
     if bot_token and chat_id:
@@ -219,6 +237,9 @@ async def telegram_message(bot_token, chat_id, message):
             await asyncio.sleep(1)
         except Exception as e:
             logging.error(f"Error sending Telegram message: {e}")
+
+# Queue for Telegram messages
+message_queue = asyncio.Queue()
 
 async def telegram_worker(bot_token, chat_id):
     while True:
@@ -373,6 +394,8 @@ async def run_keep_alive(config_file, log_error_file, poll_interval=300):
         logging.error("Missing 'bot_token' or 'chat_id' in config.")
         return
 
+    # Create new message queue for this run
+    global message_queue
     message_queue = asyncio.Queue()
 
     telegram_task = asyncio.create_task(telegram_worker(bot_token, chat_id)) if use_telegram else None
