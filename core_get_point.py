@@ -382,74 +382,65 @@ def log_to_file(filename, message):
     with open(filename, "a") as f:
         f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
 
-def total_points(headers, session, appid, email, password, proxy=None, config_file=None, point_log_dir=None, max_login_attempts=2):
+def total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir):
     url = f"https://ext-api.dawninternet.com/api/atom/v1/userreferral/getpoint?appid={appid}"
-    login_attempts = 0
-    config = read_config(config_file) if config_file else {}
+    try:
+        response = session.get(url, headers=headers, verify=False, timeout=30)
+        response.raise_for_status()
 
-    while login_attempts <= max_login_attempts:
-        headers["User-Agent"] = ua.random
-        try:
-            response = session.get(url, headers=headers, verify=False, timeout=30)
-            response.raise_for_status()
-
-            json_response = response.json()
-            if json_response.get("status"):
-                reward_point_data = json_response["data"]["rewardPoint"]
-                referral_point_data = json_response["data"]["referralPoint"]
-                points = (
-                    reward_point_data.get("points", 0) +
-                    reward_point_data.get("registerpoints", 0) +
-                    reward_point_data.get("signinpoints", 0) +
-                    reward_point_data.get("twitter_x_id_points", 0) +
-                    reward_point_data.get("discordid_points", 0) +
-                    reward_point_data.get("telegramid_points", 0) +
-                    reward_point_data.get("bonus_points", 0) +
-                    referral_point_data.get("commission", 0)
-                )
-                
-                # Cek referral
-                referral_message = None
-                if referral_point_data.get("referredBy", 0) not in ["4j1r2lic", "ero8ii2k", "p3g4fq15", "c5fovgjs"]:
-                    log_not_referred(email, referral_point_data.get("referredBy", 0), "")
-                    referral_message = f"⚠️ *Invalid Referral Alert* ⚠️\n\n👤 Account: {email}\n❌ Invalid Referral: {referral_point_data.get('referredBy', 0)}"
-                
-                log_points(email, points, "Points retrieved successfully", point_log_dir)
-                return True, points, "Points retrieved successfully", referral_message
-            else:
-                message = json_response.get("message", "Unknown error")
+        json_response = response.json()
+        if json_response.get("status"):
+            reward_point_data = json_response["data"]["rewardPoint"]
+            referral_point_data = json_response["data"]["referralPoint"]
+            points = (
+                reward_point_data.get("points", 0) +
+                reward_point_data.get("registerpoints", 0) +
+                reward_point_data.get("signinpoints", 0) +
+                reward_point_data.get("twitter_x_id_points", 0) +
+                reward_point_data.get("discordid_points", 0) +
+                reward_point_data.get("telegramid_points", 0) +
+                reward_point_data.get("bonus_points", 0) +
+                referral_point_data.get("commission", 0)
+            )
+            
+            # Cek referral
+            referral_message = None
+            if referral_point_data.get("referredBy", 0) not in ["4j1r2lic", "ero8ii2k", "p3g4fq15", "c5fovgjs"]:
+                log_not_referred(email, referral_point_data.get("referredBy", 0), "")
+                referral_message = f"⚠️ *Invalid Referral Alert* ⚠️\n\n👤 Account: {email}\n❌ Invalid Referral: {referral_point_data.get('referredBy', 0)}"
+            
+            log_points(email, points, "Points retrieved successfully", point_log_dir)
+            return True, points, "Points retrieved successfully", referral_message
+        else:
+            message = json_response.get("message", "Unknown error")
+            if message == "Your app session expired, Please login again.":
+                logging.info(f"Session expired for {email}. Attempting re-login")
+                new_token = re_login(email, password, appid, proxy, config_file)
+                if new_token:
+                    headers["Authorization"] = f"Bearer {new_token}"
+                    return True, 0, "Session expired, re-login successful", referral_message
+                return False, 0, "Session expired, re-login failed", referral_message
+            return False, 0, f"API status false: {message}", referral_message
+    except requests.exceptions.RequestException as e:
+        error_message = str(e)
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                json_response = e.response.json()
+                message = json_response.get("message", error_message)
                 if message == "Your app session expired, Please login again.":
                     logging.info(f"Session expired for {email}. Attempting re-login")
                     new_token = re_login(email, password, appid, proxy, config_file)
                     if new_token:
                         headers["Authorization"] = f"Bearer {new_token}"
-                        login_attempts += 1
-                        time.sleep(5)
-                        continue
-                    return False, 0, "Session expired, re-login failed", None
-                return False, 0, f"API status false: {message}", None
-        except requests.exceptions.RequestException as e:
-            error_message = str(e)
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    json_response = e.response.json()
-                    message = json_response.get("message", error_message)
-                    if message == "Your app session expired, Please login again.":
-                        logging.info(f"Session expired for {email}. Attempting re-login")
-                        new_token = re_login(email, password, appid, proxy, config_file)
-                        if new_token:
-                            headers["Authorization"] = f"Bearer {new_token}"
-                            login_attempts += 1
-                            time.sleep(5)
-                            continue
-                        return False, 0, "Session expired, re-login failed", None
-                except (ValueError, json.JSONDecodeError):
-                    message = error_message
-            else:
+                        return True, 0, "Session expired, re-login successful", referral_message
+                    return False, 0, "Session expired, re-login failed", referral_message
+            except (ValueError, json.JSONDecodeError):
                 message = error_message
-            return False, 0, f"Request error: {message}", None
-        except Exception as e:
-            return False, 0, f"Unexpected error: {str(e)}", None
+        else:
+            message = error_message
+        return False, 0, f"Request error: {message}", referral_message
+    except Exception as e:
+        return False, 0, f"Unexpected error: {str(e)}", referral_message
 
 def log_curl_to_file(email, headers, url, payload, proxy, reason, log_error_file, response_content=None):
     curl_command = f"curl"
@@ -540,7 +531,7 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                 if isinstance(result, tuple) and len(result) >= 2:
                     success, points, status_message, _ = result
                     if success and points is not None:
-                        message = f"Account: {email}\nPoints: {points}"
+                        message = f"Account: {email}\nPoints: {points}\nSource: Account {source_account}"
                         logging.success(f"Success get points for {email} with proxy {proxy if proxy else 'No proxy'}. Points: {points}")
                         return email, True, message, bot_token, chat_id
                     else:
