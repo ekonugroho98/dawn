@@ -565,7 +565,7 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
         if session:
             session.close()
 
-async def run_get_points(config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, get_points_interval=86400, batch_size=1):
+async def run_get_points(config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, get_points_interval=3600, batch_size=1):
     accounts = read_config(config_file).get("accounts", [])
     logging.info(f"Total accounts to process: {len(accounts)}")
 
@@ -573,8 +573,8 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
     bot_token = config.get("telegram_bot_token")
     chat_id = config.get("telegram_chat_id")
     use_proxy = config.get("use_proxy", False)
-    use_telegram = config.get("use_telegram", True)  # Enable Telegram notifications
-    whitelist_accounts = config.get("whitelist_accounts", [])  # Get whitelist accounts from config
+    use_telegram = config.get("use_telegram", True)
+    whitelist_accounts = config.get("whitelist_accounts", [])
 
     if use_telegram and (not bot_token or not chat_id):
         logging.error("Missing 'bot_token' or 'chat_id' in config.")
@@ -597,7 +597,7 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
                 ])
 
                 for email, success, message, _, _ in results:
-                    if use_telegram and message and email in whitelist_accounts:  # Only send if account is in whitelist
+                    if use_telegram and message and email in whitelist_accounts:
                         await message_queue.put(message)
                         logging.info(f"Message queued for whitelisted account {email}")
                     logging.info(f"Get points for {email} completed with status: {'success' if success else 'failed'}")
@@ -609,7 +609,7 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
                     pool.close()
                     pool.join()
 
-            logging.info(f"Get points cycle completed. Waiting {get_points_interval} seconds for next cycle.")
+            logging.info(f"Get points cycle completed. Waiting {get_points_interval} seconds (1 hour) for next cycle.")
             await asyncio.sleep(get_points_interval)
         except Exception as e:
             logging.error(f"Error in main loop: {e}")
