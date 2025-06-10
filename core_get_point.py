@@ -54,6 +54,27 @@ logger.setLevel(logging.INFO)
 SUCCESS_LEVEL = 25
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
 
+def read_last_points(last_points_file):
+    import json
+    lock = FileLock(f"{last_points_file}.lock")
+    try:
+        with lock:
+            with open(last_points_file, "r") as f:
+                return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def write_last_points(last_points_file, last_points_data):
+    import json
+    lock = FileLock(f"{last_points_file}.lock")
+    try:
+        with lock:
+            with open(last_points_file, "w") as f:
+                json.dump(last_points_data, f, indent=2)
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to write last_points file: {e}")
+        
 def log_success(message, *args, **kwargs):
     if logger.isEnabledFor(SUCCESS_LEVEL):
         logger._log(SUCCESS_LEVEL, message, args, **kwargs)
@@ -509,6 +530,7 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
     appid = account["appid"]
     password = account.get("password")
     proxy = account.get("proxy") if use_proxy else None
+    last_points_file = os.path.join(point_log_dir, "last_points.json")
 
     # Get source account from config file name
     source_account = os.path.basename(config_file).replace("config_", "").replace(".json", "")
@@ -539,17 +561,10 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                         # Hitung selisih point
                         point_diff = points - last_points
 
-                        # Update last_points ke config untuk email ini
-                        try:
-                            config_data = read_config(config_file)
-                            for acc in config_data.get("accounts", []):
-                                if acc.get("email") == email:
-                                    acc["last_points"] = points
-                                    break
-                            with open(config_file, "w") as f:
-                                json.dump(config_data, f, indent=2)
-                        except Exception as e:
-                            logging.error(f"Gagal update last_points di config: {e}")
+                        # Update last_points untuk email ini di last_points.json
+                        last_points_data = read_last_points(last_points_file)
+                        last_points_data[email] = points
+                        write_last_points(last_points_file, last_points_data)
 
                         message = (
                             "✅ *🌟 Get Points Success Notification 🌟* ✅\n\n"
