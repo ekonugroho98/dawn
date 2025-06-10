@@ -347,8 +347,14 @@ async def run_keep_alive(config_file, log_error_file, poll_interval=300):
                 for email, success, message, _, _ in results:
                     logging.info(f"Keep alive for {email} completed with status: {'success' if success else 'failed'}")
                     
-                    # Special case for auliaazka1302@gmail.com - 1 minute delay
-                    if email == "auliaazka1302@gmail.com":
+                    # Special case: 1 minute delay for selected emails
+                    delay_emails = {
+                        "auliaazka1302@gmail.com",
+                        "ekonugroho98@gmail.com",
+                        "ekonugroho181@gmail.com",
+                        "kaysankhalifatun@gmail.com"
+                    }
+                    if email in delay_emails:
                         logging.info(f"Using 1-minute delay for {email}")
                         await asyncio.sleep(60)
                     else:
