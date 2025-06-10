@@ -547,8 +547,9 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             logging.error(f"No valid token for {email}. Skipping...")
             return email, False, None, bot_token, chat_id
 
-        # Ambil last_points sebelumnya
-        last_points = account.get("last_points", 0)
+        # Ambil last_points sebelumnya dari file
+        last_points_data = read_last_points(last_points_file)
+        last_points = last_points_data.get(email, 0)
 
         attempt = 0
         while attempt < max_retries:
@@ -562,7 +563,6 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                         point_diff = points - last_points
 
                         # Update last_points untuk email ini di last_points.json
-                        last_points_data = read_last_points(last_points_file)
                         last_points_data[email] = points
                         write_last_points(last_points_file, last_points_data)
 
