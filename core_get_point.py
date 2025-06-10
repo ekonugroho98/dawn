@@ -525,6 +525,9 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             logging.error(f"No valid token for {email}. Skipping...")
             return email, False, None, bot_token, chat_id
 
+        # Ambil last_points sebelumnya
+        last_points = account.get("last_points", 0)
+
         attempt = 0
         while attempt < max_retries:
             attempt += 1
@@ -533,10 +536,26 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                 if isinstance(result, tuple) and len(result) >= 2:
                     success, points, status_message, _ = result
                     if success and points is not None:
+                        # Hitung selisih point
+                        point_diff = points - last_points
+
+                        # Update last_points ke config untuk email ini
+                        try:
+                            config_data = read_config(config_file)
+                            for acc in config_data.get("accounts", []):
+                                if acc.get("email") == email:
+                                    acc["last_points"] = points
+                                    break
+                            with open(config_file, "w") as f:
+                                json.dump(config_data, f, indent=2)
+                        except Exception as e:
+                            logging.error(f"Gagal update last_points di config: {e}")
+
                         message = (
                             "✅ *🌟 Get Points Success Notification 🌟* ✅\n\n"
                             f"👤 *Account:* {email}\n"
                             f"💰 *Points Earned:* {points}\n"
+                            f"📈 *Point Change:* {point_diff:+}\n"
                         )
                         logging.success(f"Success get points for {email} with proxy {proxy if proxy else 'No proxy'}. Points: {points}")
                         return email, True, message, bot_token, chat_id
