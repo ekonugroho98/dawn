@@ -549,7 +549,9 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
 
         # Ambil last_points sebelumnya dari file
         last_points_data = read_last_points(last_points_file)
+        logging.info(f"[DEBUG] Email: {email}, last_points_data keys: {list(last_points_data.keys())}")
         last_points = last_points_data.get(email, 0)
+        logging.info(f"[DEBUG] last_points for {email}: {last_points}")
 
         attempt = 0
         while attempt < max_retries:
