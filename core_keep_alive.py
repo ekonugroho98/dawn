@@ -318,7 +318,7 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
         if session:
             session.close()
 
-async def run_keep_alive(config_file, log_error_file, poll_interval=300):
+async def run_keep_alive(config_file, log_error_file, poll_interval=60):
     accounts = read_account(config_file)
     logging.info(f"Total accounts to process: {len(accounts)}")
 
