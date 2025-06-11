@@ -176,9 +176,10 @@ def keep_alive(headers, email, session, appid, base_keepalive_url, extension_id,
         response.raise_for_status()
 
         json_response = response.json()
-        # Periksa message di dalam data.message
-        if isinstance(json_response.get("data"), dict) and "message" in json_response["data"]:
-            return True, json_response["data"]["message"]
+        # Anggap sukses jika 'success' True, ambil pesan dari root 'message' atau 'data'
+        if json_response.get("success"):
+            msg = json_response.get("message") or json_response.get("data")
+            return True, msg
         else:
             reason = f"Message key not found in response data: {json_response}"
             logging.warning(reason)
