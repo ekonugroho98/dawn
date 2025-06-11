@@ -404,6 +404,7 @@ def log_to_file(filename, message):
         f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
 
 def total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir):
+    referral_message = None
     url = f"https://ext-api.dawninternet.com/api/atom/v1/userreferral/getpoint?appid={appid}"
     try:
         response = session.get(url, headers=headers, verify=False, timeout=30)
@@ -425,7 +426,6 @@ def total_points(headers, session, appid, email, password, proxy, config_file, p
             )
             
             # Cek referral
-            referral_message = None
             if referral_point_data.get("referredBy", 0) not in ["4j1r2lic", "ero8ii2k", "p3g4fq15", "c5fovgjs"]:
                 log_not_referred(email, referral_point_data.get("referredBy", 0), "")
                 referral_message = f"⚠️ *Invalid Referral Alert* ⚠️\n\n👤 Account: {email}\n❌ Invalid Referral: {referral_point_data.get('referredBy', 0)}"
@@ -559,7 +559,7 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             try:
                 result = total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir)
                 if isinstance(result, tuple) and len(result) >= 2:
-                    success, points, status_message, _ = result
+                    success, points, status_message, referral_message = result
                     if success and points is not None:
                         # Hitung selisih point
                         point_diff = points - last_points
