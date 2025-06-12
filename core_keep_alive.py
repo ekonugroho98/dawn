@@ -161,7 +161,7 @@ def log_curl_to_file(email, headers, keepalive_url, keepalive_payload, proxy, re
     with open(log_error_file, "a") as f:
         f.write(log_entry)
 
-def keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v, log_error_file):
+async def keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v, log_error_file):
     keepalive_url = f"{base_keepalive_url}?appid={appid}"
     keepalive_payload = {
         "username": email,
@@ -172,7 +172,11 @@ def keep_alive(headers, email, session, appid, base_keepalive_url, extension_id,
 
     headers["User-Agent"] = ua.random  # Gunakan User-Agent acak
     try:
-        response = session.post(keepalive_url, headers=headers, json=keepalive_payload, verify=False, timeout=30)
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: session.post(keepalive_url, headers=headers, json=keepalive_payload, verify=False, timeout=30)
+        )
         response.raise_for_status()
 
         json_response = response.json()
@@ -258,7 +262,7 @@ async def telegram_worker(bot_token, chat_id):
             logging.error(f"Error in telegram worker: {e}")
             await asyncio.sleep(1)
 
-def process_account(account, config_file, log_error_file, use_proxy, bot_token=None, chat_id=None, max_retries=3, retry_delay=5):
+async def process_account(account, config_file, log_error_file, use_proxy, bot_token=None, chat_id=None, max_retries=3, retry_delay=5):
     email = account["email"]
     token = account.get("token")
     appid = account["appid"]
@@ -292,9 +296,10 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
         while attempt < max_retries:
             attempt += 1
             try:
-                success, status_message = keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v, log_error_file)
+                success, status_message = await keep_alive(headers, email, session, appid, base_keepalive_url, extension_id, _v, log_error_file)
                 if success:
                     logging.success(f"Success keep alive for {email} with proxy {proxy if proxy else 'No proxy'}. Reason: {status_message}")
+                    logging.info(f"Keep alive for {email} completed with status: success")
                     return email, True, None, bot_token, chat_id
                 else:
                     logging.error(f"Attempt {attempt}/{max_retries}: Failed keep alive for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
@@ -302,7 +307,7 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
                         return email, False, None, bot_token, chat_id
                     else:
                         logging.info(f"Retrying after {retry_delay} seconds...")
-                        time.sleep(retry_delay)
+                        await asyncio.sleep(retry_delay)
                         continue
             except Exception as e:
                 logging.error(f"Attempt {attempt}/{max_retries}: Error for {email}: {str(e)}")
@@ -310,7 +315,7 @@ def process_account(account, config_file, log_error_file, use_proxy, bot_token=N
                     return email, False, None, bot_token, chat_id
                 else:
                     logging.info(f"Retrying after {retry_delay} seconds...")
-                    time.sleep(retry_delay)
+                    await asyncio.sleep(retry_delay)
                     continue
     except Exception as e:
         logging.error(f"Error processing account {email}: {str(e)}")
@@ -333,42 +338,20 @@ async def run_keep_alive(config_file, log_error_file, poll_interval=60):
     global message_queue
     message_queue = asyncio.Queue()
 
-    telegram_task = None  # No Telegram task needed
-
     while True:
         try:
-            pool = None
-            try:
-                pool = Pool(processes=10)
-                results = pool.starmap(process_account, [
-                    (account, config_file, log_error_file, use_proxy, bot_token, chat_id)
-                    for account in accounts
-                ])
-
-                for email, success, message, _, _ in results:
-                    logging.info(f"Keep alive for {email} completed with status: {'success' if success else 'failed'}")
-                    
-                    # Special case: 1 minute delay for selected emails
-                    delay_emails = {
-                        "auliaazka1302@gmail.com",
-                        "ekonugroho98@gmail.com",
-                        "ekonugroho181@gmail.com",
-                        "kaysankhalifatun@gmail.com"
-                    }
-                    if email in delay_emails:
-                        logging.info(f"Using 1-minute delay for {email}")
-                        await asyncio.sleep(60)
-                    else:
-                        await asyncio.sleep(poll_interval)
-            except Exception as e:
-                logging.error(f"Error in main loop: {e}")
-                continue
-            finally:
-                if pool:
-                    pool.close()
-                    pool.join()
-
-            logging.info(f"Keep alive cycle completed. Waiting for next cycle.")
+            # Buat tasks untuk semua akun
+            tasks = [
+                process_account(account, config_file, log_error_file, use_proxy, bot_token, chat_id)
+                for account in accounts
+            ]
+            
+            # Jalankan semua tasks secara paralel
+            results = await asyncio.gather(*tasks)
+            
+            # Tunggu interval sebelum siklus berikutnya
+            await asyncio.sleep(poll_interval)
+            
         except Exception as e:
             logging.error(f"Error in main loop: {e}")
             await asyncio.sleep(10)
