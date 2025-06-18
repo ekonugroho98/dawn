@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import colorlog
 import urllib3
 from asyncio import Queue
-from multiprocessing import Pool
+# from multiprocessing import Pool  # Removed - using synchronous processing
 from datetime import datetime
 from fake_useragent import UserAgent
 import base64
@@ -336,34 +336,37 @@ def perform_login(session, puzzle_id, captcha_solution, email, password, appid):
         logging.error(f"Login error for {email}: {json.dumps(error_details, indent=2)}")
         return error_details
 
-def re_login(email, password, appid, proxy=None, config_file=None, max_retries=3):
+def re_login(email, password, appid, proxy=None, config_file=None, max_retries=10):
     session = None
     captcha_file = None
     try:
         session = create_session(proxy)
         for attempt in range(max_retries):
             try:
+                logging.info(f"Captcha attempt {attempt + 1}/{max_retries} for {email}")
+                
                 puzzle_id = get_puzzle_id(session, appid)
                 if not puzzle_id:
-                    logging.error(f"Failed to get puzzle_id for {email}")
+                    logging.error(f"Failed to get puzzle_id for {email} (attempt {attempt + 1})")
                     time.sleep(5)
                     continue
 
                 captcha_file = get_captcha_image(session, puzzle_id, appid, email, os.path.dirname(config_file))
                 if not captcha_file:
-                    logging.error(f"Failed to get captcha image for {email}")
+                    logging.error(f"Failed to get captcha image for {email} (attempt {attempt + 1})")
                     time.sleep(5)
                     continue
 
                 captcha_solution = solve_captcha(captcha_file)
                 if not captcha_solution:
-                    logging.error(f"Failed to solve captcha for {email}")
+                    logging.error(f"Failed to solve captcha for {email} (attempt {attempt + 1})")
                     time.sleep(5)
                     continue
 
                 login_response = perform_login(session, puzzle_id, captcha_solution, email, password, appid)
                 if login_response and login_response.get("status"):
-                    logging.info(f"Re-login successful for {email}")
+                    logging.info(f"Re-login successful for {email} after {attempt + 1} attempts")
+                    log_activity_to_file(email, "RE-LOGIN_SUCCESS", f"Re-login successful with proxy {proxy if proxy else 'No proxy'} after {attempt + 1} attempts")
 
                     # Selalu gunakan update_config_with_token untuk menyimpan token
                     config_data = read_config(config_file)
@@ -388,6 +391,7 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=3
                     return None
 
                 logging.error(f"Re-login failed for {email}: {login_response}")
+                log_activity_to_file(email, "RE-LOGIN_FAILED", f"Re-login failed: {login_response}")
                 time.sleep(5)
 
             except Exception as e:
@@ -395,7 +399,8 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=3
                 time.sleep(5)
 
         # Jika semua retry gagal
-        logging.error(f"Re-login failed for {email} after {max_retries} attempts")
+        logging.error(f"Re-login failed for {email} after {max_retries} captcha attempts")
+        log_activity_to_file(email, "RE-LOGIN_FAILED_ALL_ATTEMPTS", f"Re-login failed after {max_retries} captcha attempts")
         config_data = read_config(config_file)
         update_config_with_token(None, config_data, email, config_file, is_failed_login=True)
         return None
@@ -413,6 +418,79 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=3
 def log_to_file(filename, message):
     with open(filename, "a") as f:
         f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
+
+def log_activity_to_file(email, activity, details, log_file="log.txt"):
+    """Log all activities to log.txt file"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"[{timestamp}] {activity} - {email} - {details}\n"
+    try:
+        with open(log_file, "a") as f:
+            f.write(log_entry)
+    except Exception as e:
+        logging.error(f"Failed to write to {log_file}: {e}")
+
+def get_account_name_from_config(config_file):
+    """Extract account name from config file path"""
+    config_name = os.path.basename(config_file)
+    if config_name == "config.json":
+        return "account_1"
+    elif config_name.startswith("config_") and config_name.endswith(".json"):
+        account_number = config_name.replace("config_", "").replace(".json", "")
+        return f"account_{account_number}"
+    else:
+        return "unknown_account"
+
+def generate_points_summary(results, config_file, point_log_dir):
+    """Generate points summary for the current account group"""
+    account_name = get_account_name_from_config(config_file)
+    last_points_file = os.path.join(point_log_dir, "last_points.json")
+    last_points_data = read_last_points(last_points_file)
+    
+    successful_accounts = 0
+    failed_accounts = 0
+    total_points = 0
+    account_details = []
+    
+    for email_result, success, message, _, _ in results:
+        points = last_points_data.get(email_result, 0)  # Always get points from last_points
+        if success:
+            successful_accounts += 1
+            total_points += points
+            status_emoji = "✅"
+        else:
+            failed_accounts += 1
+            status_emoji = "❌"
+            
+        account_details.append({
+            "email": email_result,
+            "points": points,
+            "status": status_emoji,
+            "success": success
+        })
+    
+    # Sort by points descending
+    account_details.sort(key=lambda x: x["points"], reverse=True)
+    
+    # Create summary message
+    summary_message = f"📊 *{account_name.upper()} CYCLE SUMMARY* 📊\n\n"
+    summary_message += f"🎯 *Total Accounts:* {len(results)}\n"
+    summary_message += f"✅ *Successful:* {successful_accounts}\n"
+    summary_message += f"❌ *Failed:* {failed_accounts}\n"
+    summary_message += f"💰 *Total Points:* {total_points:,}\n"
+    summary_message += f"📈 *Success Rate:* {(successful_accounts/len(results)*100):.1f}%\n\n"
+    
+    summary_message += "*📋 TOP ACCOUNTS:*\n"
+    for i, account in enumerate(account_details[:8], 1):  # Show top 8 accounts
+        # Truncate email for better display
+        display_email = account['email'][:20] + "..." if len(account['email']) > 23 else account['email']
+        summary_message += f"{i}. {account['status']} `{display_email}` - {account['points']:,} pts\n"
+    
+    if len(account_details) > 8:
+        summary_message += f"... and {len(account_details) - 8} more accounts\n"
+    
+    summary_message += f"\n⏰ *Completed:* {datetime.now().strftime('%H:%M:%S')}"
+    
+    return summary_message
 
 def total_points(headers, session, appid, email, password, proxy, config_file, point_log_dir):
     referral_message = None
@@ -507,6 +585,7 @@ async def telegram_message(bot_token, chat_id, message):
             bot = telegram.Bot(token=bot_token)
             await bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
             logging.info(f"Successfully sent Telegram message: {message[:100]}...")
+            log_activity_to_file("TELEGRAM", "MESSAGE_SENT", f"Message sent to chat {chat_id}: {message[:50]}...")
             await asyncio.sleep(1)
         except Exception as e:
             logging.error(f"Error sending Telegram message: {str(e)}")
@@ -555,8 +634,15 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
         }
 
         if not token:
-            logging.error(f"No valid token for {email}. Skipping...")
-            return email, False, None, bot_token, chat_id
+            logging.warning(f"No valid token for {email}. Attempting re-login...")
+            new_token = re_login(email, password, appid, proxy, config_file)
+            if new_token:
+                token = new_token
+                headers["Authorization"] = f"Bearer {new_token}"
+                logging.info(f"Re-login successful for {email}, got new token")
+            else:
+                logging.error(f"Re-login failed for {email}. Skipping...")
+                return email, False, None, bot_token, chat_id
 
         # Ambil last_points sebelumnya dari file
         last_points_data = read_last_points(last_points_file)
@@ -584,10 +670,12 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                             f"📈 *Point Change:* {point_diff:+}\n"
                         )
                         logging.success(f"Success get points for {email} with proxy {proxy if proxy else 'No proxy'}. Points: {points}")
+                        log_activity_to_file(email, "GET_POINTS_SUCCESS", f"Points: {points}, Change: {point_diff:+}, Proxy: {proxy if proxy else 'No proxy'}")
                         return email, True, message, bot_token, chat_id
                     else:
                         logging.error(f"Attempt {attempt}/{max_retries}: Failed get points for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
                         if attempt == max_retries:
+                            log_activity_to_file(email, "GET_POINTS_FAILED", f"Failed after {max_retries} attempts. Reason: {status_message}")
                             return email, False, None, bot_token, chat_id
                         else:
                             logging.info(f"Retrying after {retry_delay} seconds...")
@@ -617,9 +705,6 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
             session.close()
 
 async def run_get_points(config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, get_points_interval=3600, batch_size=1):
-    accounts = read_config(config_file).get("accounts", [])
-    logging.info(f"Total accounts to process: {len(accounts)}")
-
     config = read_config(config_file)
     bot_token = config.get("telegram_bot_token")
     chat_id = config.get("telegram_chat_id")
@@ -634,38 +719,73 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
         logging.error("Missing 'bot_token' or 'chat_id' in config.")
         return
 
-    # Create new message queue for this run
+    # Create message queue and telegram worker ONCE outside the loop
     global message_queue
     message_queue = asyncio.Queue()
 
-    telegram_task = asyncio.create_task(telegram_worker(bot_token, chat_id)) if use_telegram else None
-    logging.info("Telegram worker task created")
+    telegram_task = None
+    if use_telegram:
+        telegram_task = asyncio.create_task(telegram_worker(bot_token, chat_id))
+        logging.info("Telegram worker task created")
 
     while True:
         try:
-            pool = None
-            try:
-                pool = Pool(processes=10)
-                results = pool.starmap(process_get_points, [
-                    (account, config_file, point_log_dir, log_error_file, total_point_log, not_referral_log, use_proxy, bot_token, chat_id)
-                    for account in accounts
-                ])
-
-                for email, success, message, _, _ in results:
-                    if use_telegram and message and email in whitelist_accounts:
-                        logging.info(f"Queueing message for whitelisted account {email}")
+            # Read accounts fresh every cycle in case config changes
+            accounts = read_config(config_file).get("accounts", [])
+            logging.info(f"🚀 SYNCHRONOUS MODE: Processing {len(accounts)} accounts sequentially")
+            logging.info(f"🔄 Max captcha retry per re-login: 10 attempts")
+            logging.info("🔄 Starting SYNCHRONOUS processing of all accounts...")
+            results = []
+            
+            for i, account in enumerate(accounts, 1):
+                email = account.get("email", "unknown")
+                logging.info(f"📋 Processing account {i}/{len(accounts)}: {email}")
+                
+                try:
+                    result = process_get_points(
+                        account, config_file, point_log_dir, log_error_file, 
+                        total_point_log, not_referral_log, use_proxy, bot_token, chat_id
+                    )
+                    results.append(result)
+                    
+                    # Process Telegram message immediately
+                    email_result, success, message, _, _ = result
+                    if use_telegram and message and email_result in whitelist_accounts:
+                        logging.info(f"📤 Sending Telegram message for whitelisted account {email_result}")
                         await message_queue.put(message)
-                        logging.info(f"Message queued for whitelisted account {email}")
-                    logging.info(f"Get points for {email} completed with status: {'success' if success else 'failed'}")
-            except Exception as e:
-                logging.error(f"Error in main loop: {e}")
-                continue
-            finally:
-                if pool:
-                    pool.close()
-                    pool.join()
+                        logging.info(f"✅ Message queued for whitelisted account {email_result}")
+                    
+                    logging.info(f"✅ Account {i}/{len(accounts)} ({email_result}) completed: {'success' if success else 'failed'}")
+                    
+                    # Add small delay between accounts to avoid rate limiting
+                    if i < len(accounts):  # Don't sleep after last account
+                        logging.info("⏳ Waiting 2 seconds before next account...")
+                        await asyncio.sleep(2)
+                        
+                except Exception as e:
+                    logging.error(f"❌ Error processing account {email}: {e}")
+                    results.append((email, False, None, bot_token, chat_id))
+                    continue
 
-            logging.info(f"Get points cycle completed. Waiting {get_points_interval} seconds (1 hour) for next cycle.")
+            # Cycle summary
+            successful_accounts = sum(1 for _, success, _, _, _ in results if success)
+            failed_accounts = len(results) - successful_accounts
+            logging.info(f"📊 CYCLE SUMMARY: {successful_accounts} successful, {failed_accounts} failed out of {len(accounts)} total accounts")
+            
+            # Generate and send points summary to Telegram
+            if use_telegram and bot_token and chat_id:
+                try:
+                    account_name = get_account_name_from_config(config_file)
+                    summary_message = generate_points_summary(results, config_file, point_log_dir)
+                    logging.info(f"📤 Sending cycle summary to Telegram for {account_name}")
+                    logging.info(f"📊 Summary contains {len(results)} accounts, {successful_accounts} successful")
+                    await message_queue.put(summary_message)
+                    logging.info(f"✅ Cycle summary queued for Telegram - {account_name}")
+                    log_activity_to_file("CYCLE_SUMMARY", "TELEGRAM_QUEUED", f"{account_name} - {successful_accounts}/{len(results)} successful")
+                except Exception as e:
+                    logging.error(f"❌ Failed to generate/send cycle summary: {e}")
+            
+            logging.info(f"⏰ Get points cycle completed. Waiting {get_points_interval} seconds (1 hour) for next cycle.")
             await asyncio.sleep(get_points_interval)
         except Exception as e:
             logging.error(f"Error in main loop: {e}")
