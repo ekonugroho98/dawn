@@ -278,7 +278,14 @@ def get_captcha_image(session, puzzle_id, appid, email, captcha_dir):
 def solve_captcha(image_path):
     solver = imagecaptcha()
     solver.set_verbose(1)
-    solver.set_key("377c52bebe64c59195ad7cdfd3a994fe")  # Replace with your AntiCaptcha API key
+    
+    # Get API key from environment variable
+    api_key = os.getenv("ANTICAPTCHA_API_KEY")
+    if not api_key:
+        logging.error("ANTICAPTCHA_API_KEY environment variable not set")
+        return None
+    
+    solver.set_key(api_key)
     solver.set_soft_id(0)
     captcha_text = solver.solve_and_return_solution(image_path)
     if captcha_text:
@@ -361,6 +368,10 @@ def re_login(email, password, appid, proxy=None, config_file=None, max_retries=3
                     # Selalu gunakan update_config_with_token untuk menyimpan token
                     config_data = read_config(config_file)
                     update_config_with_token(login_response, config_data, email, config_file, is_failed_login=False)
+                    
+                    # Update last_success timestamp after successful re-login
+                    config_data = read_config(config_file)
+                    update_config_with_success(email, config_data, config_file)
                     
                     # Verifikasi token telah diupdate
                     config_data = read_config(config_file)

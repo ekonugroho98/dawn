@@ -33,3 +33,4 @@ captcha/
 accounts*/
 config*.json
 config.txt
+.env

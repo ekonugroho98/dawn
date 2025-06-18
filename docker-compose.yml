@@ -5,6 +5,8 @@ services:
     container_name: account_1
     volumes:
       - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_1/account_1.py"]
   
   main_1:
@@ -12,6 +14,8 @@ services:
     container_name: main_1
     volumes:
       - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_1/main_1.py"]
 
   account_2:
@@ -19,6 +23,8 @@ services:
     container_name: account_2
     volumes:
       - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_2/account_2.py"]
 
   main_2:
@@ -26,6 +32,8 @@ services:
     container_name: main_2
     volumes:
       - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_2/main_2.py"]
 
   account_3:
@@ -33,6 +41,8 @@ services:
     container_name: account_3
     volumes:
       - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_3/account_3.py"]
 
   main_3:
@@ -40,6 +50,8 @@ services:
     container_name: main_3
     volumes:
       - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_3/main_3.py"]
 
   account_4:
@@ -47,6 +59,8 @@ services:
     container_name: account_4
     volumes:
       - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_4/account_4.py"]
 
   main_4:
@@ -54,6 +68,8 @@ services:
     container_name: main_4
     volumes:
       - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_4/main_4.py"]
 
   account_5:
@@ -61,6 +77,8 @@ services:
     container_name: account_5
     volumes:
       - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_5/account_5.py"]
 
   main_5:
@@ -68,4 +86,6 @@ services:
     container_name: main_5
     volumes:
       - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_5/main_5.py"]
