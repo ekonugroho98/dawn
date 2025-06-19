@@ -500,7 +500,7 @@ def total_points(headers, session, appid, email, password, proxy, config_file, p
         response.raise_for_status()
 
         json_response = response.json()
-        if json_response.get("status"):
+        if json_response.get("status") or json_response.get("success"):
             reward_point_data = json_response["data"]["rewardPoint"]
             referral_point_data = json_response["data"]["referralPoint"]
             points = (
