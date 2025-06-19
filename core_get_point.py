@@ -663,15 +663,10 @@ def process_get_points(account, config_file, point_log_dir, log_error_file, tota
                         last_points_data[email] = points
                         write_last_points(last_points_file, last_points_data)
 
-                        message = (
-                            "✅ *🌟 Get Points Success Notification 🌟* ✅\n\n"
-                            f"👤 *Account:* {email}\n"
-                            f"💰 *Points Earned:* {points}\n"
-                            f"📈 *Point Change:* {point_diff:+}\n"
-                        )
+                        # Removed individual message creation - only summary will be sent
                         logging.success(f"Success get points for {email} with proxy {proxy if proxy else 'No proxy'}. Points: {points}")
                         log_activity_to_file(email, "GET_POINTS_SUCCESS", f"Points: {points}, Change: {point_diff:+}, Proxy: {proxy if proxy else 'No proxy'}")
-                        return email, True, message, bot_token, chat_id
+                        return email, True, None, bot_token, chat_id
                     else:
                         logging.error(f"Attempt {attempt}/{max_retries}: Failed get points for {email} with proxy {proxy if proxy else 'No proxy'} and appid {appid}. Reason: {status_message}")
                         if attempt == max_retries:
@@ -710,10 +705,8 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
     chat_id = config.get("telegram_chat_id")
     use_proxy = config.get("use_proxy", False)
     use_telegram = config.get("use_telegram", True)
-    whitelist_accounts = config.get("whitelisted_accounts", [])
 
     logging.info(f"Telegram settings - use_telegram: {use_telegram}, bot_token: {bool(bot_token)}, chat_id: {chat_id}")
-    logging.info(f"Whitelisted accounts: {whitelist_accounts}")
 
     if use_telegram and (not bot_token or not chat_id):
         logging.error("Missing 'bot_token' or 'chat_id' in config.")
@@ -748,13 +741,8 @@ async def run_get_points(config_file, point_log_dir, log_error_file, total_point
                     )
                     results.append(result)
                     
-                    # Process Telegram message immediately
-                    email_result, success, message, _, _ = result
-                    if use_telegram and message and email_result in whitelist_accounts:
-                        logging.info(f"📤 Sending Telegram message for whitelisted account {email_result}")
-                        await message_queue.put(message)
-                        logging.info(f"✅ Message queued for whitelisted account {email_result}")
-                    
+                    # Removed individual telegram message sending - only summary will be sent
+                    email_result, success, _, _, _ = result
                     logging.info(f"✅ Account {i}/{len(accounts)} ({email_result}) completed: {'success' if success else 'failed'}")
                     
                     # Add small delay between accounts to avoid rate limiting
