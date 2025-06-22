@@ -80,14 +80,6 @@ services:
     environment:
       - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_5/account_5.py"]
-  account_6:
-    build: .
-    container_name: account_6
-    volumes:
-      - .:/app
-    environment:
-      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
-    command: ["python", "account_6/account_6.py"]
 
   main_5:
     build: .
@@ -97,3 +89,21 @@ services:
     environment:
       - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
     command: ["python", "account_5/main_5.py"]
+
+  account_6:
+    build: .
+    container_name: account_6
+    volumes:
+      - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
+    command: ["python", "account_6/account_6.py"] 
+
+  main_6:
+    build: .
+    container_name: main_6
+    volumes:
+      - .:/app
+    environment:
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY}
+    command: ["python", "account_6/main_6.py"]
