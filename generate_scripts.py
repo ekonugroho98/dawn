@@ -7,8 +7,8 @@ import shutil
 def create_account_structure(config_file):
     # Extract account number from config file (e.g., config_2.json -> account_2)
     base_name = os.path.basename(config_file)
-    if base_name == "config_4.json":
-        account_name = "account_4"
+    if base_name == "config_6.json":
+        account_name = "account_6"
     else:
         account_number = base_name.replace("config_", "").replace(".json", "")
         account_name = f"account_{account_number}"
