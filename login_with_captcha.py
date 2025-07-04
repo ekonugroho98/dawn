@@ -50,15 +50,24 @@ def parse_proxy(proxy):
     return {}
 
 # Fungsi untuk memeriksa proxy
-def check_proxy(proxy):
-    return True
-    # proxies = parse_proxy(proxy)
-    # test_url = "http://httpbin.org/ip"
-    # try:
-    #     response = requests.get(test_url, proxies=proxies, timeout=5)
-    #     return response.status_code == 200
-    # except requests.RequestException:
-    #     return False
+def check_proxy(proxy, timeout=10):
+    """Check if the proxy is active and responsive"""
+    proxies = parse_proxy(proxy)
+    test_url = "http://httpbin.org/ip"
+    try:
+        response = requests.get(test_url, proxies=proxies, timeout=timeout)
+        if response.status_code == 200:
+            logger.debug(f"Proxy {proxy} is working")
+            return True
+        else:
+            logger.debug(f"Proxy {proxy} returned status {response.status_code}")
+            return False
+    except requests.RequestException as e:
+        logger.debug(f"Proxy {proxy} failed: {str(e)}")
+        return False
+    except Exception as e:
+        logger.debug(f"Unexpected error testing proxy {proxy}: {str(e)}")
+        return False
 
 # Membaca daftar proxy dari file
 def read_proxies(filename=PROXY_FILE):
@@ -139,7 +148,14 @@ def get_captcha_image(session, puzzle_id, appid, output_file="captcha_image.png"
 def solve_captcha(image_path):
     solver = imagecaptcha()
     solver.set_verbose(1)
-    solver.set_key("377c52bebe64c59195ad7cdfd3a994fe")  # Ganti dengan API key Anda
+    
+    # Get API key from environment variable
+    api_key = os.getenv("ANTICAPTCHA_API_KEY")
+    if not api_key:
+        logger.error("ANTICAPTCHA_API_KEY environment variable not set")
+        return None
+    
+    solver.set_key(api_key)
     solver.set_soft_id(0)
     captcha_text = solver.solve_and_return_solution(image_path)
     if captcha_text != 0:
@@ -313,93 +329,6 @@ def login_all_accounts(config_file=CONFIG_FILE, max_retries=1, error_log_file="c
                             log_to_file(invalid_log_file, f"ERROR: {error_message}")
                             account_processed = True  # Tandai akun sebagai diproses untuk skip
                             break
-                        else:
-                            logger.error(f"Login gagal untuk {email} dengan {'proxy ' + proxy if proxy else 'tanpa proxy'}.")
-                            break
-
-                if account_processed:
-                    break
-                if retries >= max_retries:
-                    logger.error(f"Gagal login untuk {email} setelah {max_retries} percobaan captcha.")
-                    break
-
-            finally:
-                session.close()
-    try:
-        with open(config_file, "r") as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        logger.error(f"File {config_file} tidak ditemukan.")
-        return
-
-    use_proxy = config.get("use_proxy", False)
-    if "accounts" not in config or not config["accounts"]:
-        logger.error("Tidak ada akun di config.json.")
-        return
-
-    proxy_list = get_active_proxies() if use_proxy else [None]
-    if use_proxy and not proxy_list:
-        logger.error("use_proxy true tetapi tidak ada proxy aktif. Berhenti.")
-        return
-
-    if not os.path.exists(error_log_file):
-        with open(error_log_file, "w") as f:
-            f.write("Log Error Captcha Salah\n\n")
-
-    for account in config["accounts"]:
-        if "email" not in account or "password" not in account or "appid" not in account:
-            logger.error(f"Akun {account.get('email', 'tanpa email')} tidak memiliki email, password, atau appid.")
-            continue
-        
-        email = account["email"]
-        password = account["password"]
-        appid = account["appid"]
-        token = account.get("token", "")
-
-        if token and token not in ["", "YOUR BEARER TOKEN"]:
-            logger.info(f"Token sudah ada untuk {email}. Melewati akun ini.")
-            continue
-
-        logger.info(f"Memproses login untuk {email} dengan appid {appid}...")
-        account_processed = False
-
-        for proxy in proxy_list:
-            session = create_session(proxy)
-            try:
-                puzzle_id = get_puzzle_id(session, appid)
-                if not puzzle_id:
-                    continue
-
-                retries = 0
-                while retries < max_retries:
-                    captcha_file = get_captcha_image(session, puzzle_id, appid)
-                    if not captcha_file:
-                        break
-
-                    captcha_solution = solve_captcha(captcha_file)
-                    if not captcha_solution:
-                        break
-
-                    login_response = perform_login(session, puzzle_id, captcha_solution, email, password, appid)
-                    logger.debug(f"Raw login response untuk {email}: {login_response}")  # Debugging
-
-                    if login_response and isinstance(login_response, dict) and login_response.get("status"):
-                        logger.info(f"Login berhasil untuk {email} dengan {'proxy ' + proxy if proxy else 'tanpa proxy'}!")
-                        config = update_config_with_token(login_response, config)
-                        account_processed = True
-                        break
-                    else:
-                        # Cek apakah error karena captcha salah
-                        if (login_response and isinstance(login_response, dict) and 
-                            not login_response.get("success", True) and 
-                            login_response.get("message") == "Incorrect answer. Try again!"):
-                            retries += 1
-                            error_message = (f"Email: {email} | Captcha: {captcha_solution} | "
-                                           f"Proxy: {proxy if proxy else 'Tanpa Proxy'} | "
-                                           f"Retry: {retries}/{max_retries}")
-                            logger.info(f"Captcha salah untuk {email}. Retry {retries}/{max_retries}...")
-                            log_to_file(error_log_file, f"ERROR: Incorrect answer - {error_message}")
-                            continue
                         else:
                             logger.error(f"Login gagal untuk {email} dengan {'proxy ' + proxy if proxy else 'tanpa proxy'}.")
                             break

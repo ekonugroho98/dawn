@@ -83,16 +83,24 @@ def parse_proxy(proxy):
             }
     return {}
 
-def check_proxy(proxy):
-    return True  # Always return True for proxy check
-    # """Check if the proxy is active without logging."""
-    # proxies = parse_proxy(proxy)
-    # test_url = "http://httpbin.org/ip"
-    # try:
-        # response = requests.get(test_url, proxies=proxies, timeout=30)
-        # return response.status_code == 200
-    # except requests.RequestException:
-    #     return False
+def check_proxy(proxy, timeout=10):
+    """Check if the proxy is active and responsive"""
+    proxies = parse_proxy(proxy)
+    test_url = "http://httpbin.org/ip"
+    try:
+        response = requests.get(test_url, proxies=proxies, timeout=timeout)
+        if response.status_code == 200:
+            logging.debug(f"Proxy {proxy} is working")
+            return True
+        else:
+            logging.debug(f"Proxy {proxy} returned status {response.status_code}")
+            return False
+    except requests.RequestException as e:
+        logging.debug(f"Proxy {proxy} failed: {str(e)}")
+        return False
+    except Exception as e:
+        logging.debug(f"Unexpected error testing proxy {proxy}: {str(e)}")
+        return False
 
 def create_session(proxy=None):
     session = requests.Session()
